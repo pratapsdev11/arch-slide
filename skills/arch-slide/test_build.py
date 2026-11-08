@@ -1,4 +1,4 @@
-"""Smoke check for build.py. Run: python test_build.py   (needs python-pptx)"""
+"""Smoke checks for arch-slide. Run: python test_build.py   (needs python-pptx, pymupdf)"""
 import json
 import subprocess
 import sys
@@ -13,32 +13,32 @@ from pptx.oxml.ns import qn
 from pptx.util import Inches
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import layout as L  # noqa: E402
 
 
 def run(*args):
-    r = subprocess.run([sys.executable, str(HERE / "build.py"), *args],
-                       capture_output=True, text=True, encoding="utf-8")
+    r = subprocess.run([sys.executable, str(HERE / "build.py"), *args], capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 0, r.stderr
     return json.loads(r.stdout)
 
 
-def overlap(a, b):
-    return a.left < b.left + b.width and b.left < a.left + a.width and \
-        a.top < b.top + b.height and b.top < a.top + a.height
+def issues(rep, rule=None):
+    return [i for s in rep["slides"] for i in s["lint"]["issues"] if rule is None or i["rule"] == rule]
 
 
 def test_build(tmp):
     spec = json.loads((HERE / "examples" / "sample.json").read_text(encoding="utf-8"))
     sources = spec["root"]["children"][0]["children"][0]["children"]
-    sources[0]["desc"] = "x" * 120          # long text -> reported, font not shrunk
-    sources[1]["icon"] = "nope/missing"     # missing icon -> placeholder + report
+    sources[0]["desc"] = "x" * 120          # one 120-char word: text-fit + desc-chars, font not shrunk
+    sources[1]["icon"] = "nope/missing"     # missing icon -> placeholder + lint error
     (tmp / "spec.json").write_text(json.dumps(spec), encoding="utf-8")
-    out = tmp / "out.pptx"
+    out = tmp / "out" / "out.pptx"
     rep = run("build", str(tmp / "spec.json"), "-o", str(out))
-
-    assert not rep["errors"], rep["errors"]
-    assert {"node": "files", "icon": "nope/missing"} in rep["missing_icons"]
-    assert any(t["id"] == "erp" for t in rep["too_long"])
+    assert any(i["id"] == "files" for i in issues(rep, "missing-icon")), issues(rep)
+    assert any(i["id"] == "erp" for i in issues(rep, "desc-chars"))
+    assert not issues(rep, "unrouted-flow") and not issues(rep, "arrow-through-box"), issues(rep)
+    assert (tmp / "lint.json").exists() and not rep["ok"]
 
     prs = Presentation(str(out))
     slide = prs.slides[0]
@@ -49,13 +49,61 @@ def test_build(tmp):
     zones = [sh for sh in slide.shapes if sh.name.startswith("zone:")]
     assert len(zones) == 6, [z.name for z in zones]  # 4 zones + 2 bands in sample.json
     for a, b in combinations(zones, 2):
-        assert not overlap(a, b), (a.name, b.name)
+        assert not L.overlap((a.left, a.top, a.width, a.height), (b.left, b.top, b.width, b.height), 0), (a.name, b.name)
     names = {e.get("name") for e in slide._element.iter(qn("p:cNvPr"))}
-    assert "missing-icon:files" in names and "node:files" in names and "legend" in names
-    min_sz = min(int(e.get("sz")) for e in slide._element.iter(qn("a:rPr")) if e.get("sz"))
-    assert min_sz >= 800, min_sz            # neutral minFontPt = 8
-    pics = [e for e in slide._element.iter(qn("p:pic"))]
-    assert all(p.find(f".//{qn('p:cNvPr')}").get("name").startswith("icon:") for p in pics)  # no images of text
+    assert {"missing-icon:files", "node:files", "legend"} <= names
+    assert min(int(e.get("sz")) for e in slide._element.iter(qn("a:rPr")) if e.get("sz")) >= 800
+    pics = [p.find(f".//{qn('p:cNvPr')}").get("name") for p in slide._element.iter(qn("p:pic"))]
+    assert all(n.startswith("icon:") for n in pics), pics  # no images of text
+
+
+def test_router():
+    a, b, wall = (0.5, 2.0, 1.0, 1.0), (4.0, 2.0, 1.0, 1.0), (2.2, 1.0, 0.6, 3.0)
+    p = L.route(a, b, [wall], {}, (0, 0, 6, 6))
+    assert p and not any(L.seg_hits_rect(s, t, wall) for s, t in L.segments(p)), p
+    assert L.route(a, b, [], {}, (0, 0, 6, 6)) == [(1.5, 2.5), (4.0, 2.5)] or len(L.route(a, b, [], {}, (0, 0, 6, 6))) == 2
+
+
+def test_sequence_flows(tmp):
+    (tmp / "flow.mmd").write_text("""sequenceDiagram
+    autonumber
+    participant U as User
+    participant API
+    participant DB
+    U->>API: submit
+    API->>DB: save
+    DB-->>API: ok
+    API->>API: audit
+    API-->>U: done
+""", encoding="utf-8")
+    spec = {"title": "Seq", "sequence": "flow.mmd", "flows": "from-sequence",
+            "root": {"dir": "row", "children": [
+                {"id": "users", "title": "Users", "children": [{"id": "u", "name": "User", "participants": ["U"]}]},
+                {"id": "app", "title": "App", "children": [{"id": "api", "name": "API", "participants": ["API"]}]},
+                {"id": "data", "title": "Data", "children": [{"id": "db", "name": "Database", "participants": ["DB"]}]}]}}
+    (tmp / "seq.json").write_text(json.dumps(spec), encoding="utf-8")
+    rep = run("build", str(tmp / "seq.json"), "-o", str(tmp / "seq.pptx"))
+    assert rep["slides"][0]["flows"] == 2                              # U<->API, API<->DB
+    assert not issues(rep, "traceability") and not issues(rep, "unrouted-flow"), issues(rep)
+    assert [i["id"] for i in issues(rep, "unused-messages")] == ["message 4"]  # the self-message
+    labels = [sh.text_frame.text for sh in Presentation(str(tmp / "seq.pptx")).slides[0].shapes
+              if sh.name.startswith("label:")]
+    assert any(t.startswith("1 · 5") for t in labels) and any(t.startswith("2 · 3") for t in labels), labels
+
+
+def test_rules_from_org_and_project(tmp):
+    org = tmp / "org"
+    org.mkdir()
+    (org / "style.json").write_text(json.dumps({"rules": {
+        "min-font": {"minPt": 10},                           # org guideline: nothing under 10 pt
+        "title-case": {"severity": "error", "case": "upper"}}}), encoding="utf-8")
+    spec = {"title": "Rules", "rules": {"density": {"maxNodes": 1}},   # project-level override
+            "root": {"dir": "row", "children": [
+                {"id": "z", "title": "Mixed Case", "children": [{"id": "a", "name": "A"}, {"id": "b", "name": "B"}]}]}}
+    (tmp / "rules.json").write_text(json.dumps(spec), encoding="utf-8")
+    rep = run("build", str(tmp / "rules.json"), "--style", str(org), "-o", str(tmp / "rules.pptx"))
+    sev = {(i["rule"], i["severity"]) for i in issues(rep)}
+    assert ("min-font", "error") in sev and ("title-case", "error") in sev and ("density", "warn") in sev, sev
 
 
 def test_template(tmp):
@@ -81,8 +129,24 @@ def test_template(tmp):
     assert "Footer Band" in {sh.name for sh in layout[0].shapes} and "Title" not in texts
 
 
+def test_icons(tmp):
+    # gradient-filled SVG (how Azure icons are drawn) must come out in colour, not black
+    src = tmp / "svg"
+    src.mkdir()
+    (src / "10001-icon-service-Grad-Box.svg").write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><defs><linearGradient id="g">'
+        '<stop offset="0" stop-color="#ff0000"/><stop offset="1" stop-color="#ff0000"/></linearGradient></defs>'
+        '<rect width="10" height="10" fill="url(#g)"/></svg>', encoding="utf-8")
+    rep = run("icons", str(src), str(tmp / "png"))
+    assert rep["converted"] == 1 and rep["failed"] == 0, rep
+    from PIL import Image
+    px = Image.open(tmp / "png" / "grad-box.png").convert("RGB").getpixel((128, 128))
+    assert px[0] > 200 and px[1] < 60, px
+
+
 if __name__ == "__main__":
-    with tempfile.TemporaryDirectory() as d:
-        test_build(Path(d))
-        test_template(Path(d))
+    test_router()
+    for t in (test_build, test_sequence_flows, test_rules_from_org_and_project, test_template, test_icons):
+        with tempfile.TemporaryDirectory() as d:
+            t(Path(d))
     print("ok")

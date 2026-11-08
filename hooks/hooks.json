@@ -1,0 +1,16 @@
+{
+  "description": "arch-slide quality gate: Claude can't finish while the latest architecture build has lint errors or no independent review.",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/hooks/quality_gate.py\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

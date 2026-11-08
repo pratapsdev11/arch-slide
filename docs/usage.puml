@@ -24,8 +24,10 @@ loop until approved
   C -> W : update 01-brief.md
 end
 
-== Checkpoint 2 - Numbered flow ==
-C -> W : 02-flow.md (numbered messages + sequence diagram)
+== Checkpoint 2 - Sequence diagram (source of truth) ==
+C -> W : 02-flow.mmd (Mermaid, autonumber) + 02-flow.md
+C -> B : seq 02-flow.mmd
+B --> C : participants + numbered messages
 C -> U : flow + "where do you need more depth?"
 loop until user says okay
   U -> C : add auth / approval / write-back / errors / monitoring
@@ -59,18 +61,25 @@ else new style
   U -> C : confirm / adjust
 end
 
-== Checkpoint 4 - Build the slide ==
-C -> W : arch-spec.json (box tree + flows numbered from 02-flow)
+== Checkpoint 4 - Model, build, lint, review ==
+C -> W : arch-spec.json (boxes own participants; flows: from-sequence)
 loop until preview is clean
   C -> B : build arch-spec.json --style {org}
   B -> W : {UseCase}-Architecture.pptx
-  B --> C : report (errors, missing icons, overflow, icons used)
+  B -> B : measure text, size boxes, route arrows, render
+  B -> W : lint.json (org + project rules, score, fixes)
+  B --> C : report (lint issues, icons used)
   C -> B : preview
   B -> L : render
   L --> C : PNG
-  C -> C : check overlaps, clipped text, placeholders\nshorten text / rebalance weights
+  C -> C : fix the spec using each lint issue's fix
 end
-C -> U : preview + file path\n+ missing icons + assumptions to check
+participant "arch-reviewer\n(subagent)" as R
+C -> R : preview + spec + lint + style + brief
+R --> C : VERDICT PASS / FAIL + fixes
+C -> W : review.md
+note over C : Stop hook blocks finishing until\nlint has 0 errors and review says PASS
+C -> U : preview + file path + lint score\n+ icon stand-ins + assumptions to check
 
 opt user wants changes
   U -> C : "move X", "rename Y", "add a detail slide"

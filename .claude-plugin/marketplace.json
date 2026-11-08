@@ -1,11 +1,14 @@
 {
   "name": "arch-slide",
-  "owner": { "name": "pratapsdev11", "url": "https://github.com/pratapsdev11" },
+  "owner": {
+    "name": "pratapsdev11",
+    "url": "https://github.com/pratapsdev11"
+  },
   "plugins": [
     {
       "name": "arch-slide",
       "source": "./",
-      "description": "Turn a SOW or idea deck into an editable, architecture-only PowerPoint slide in your organisation's own style."
+      "description": "Turn a SOW or idea deck into an editable architecture slide in your organisation's style: sequence-diagram driven, real-font layout, routed arrows, org-defined lint rules, independent review and a quality-gate hook."
     }
   ]
 }
