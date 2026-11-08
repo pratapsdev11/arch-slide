@@ -1,0 +1,52 @@
+{
+  "title": "Sample Use Case — Architecture",
+  "root": {"dir": "col", "children": [
+    {"id": "pipeline", "dir": "row", "weight": 3, "children": [
+      {"id": "sources", "title": "1. Sources", "children": [
+        {"id": "erp", "name": "ERP System", "desc": ["Orders, invoices", "Master data"], "icon": "generic/database"},
+        {"id": "files", "name": "File Shares", "desc": "Contracts & documents", "icon": "generic/document"},
+        {"id": "ext", "name": "External APIs", "desc": "Market & partner data", "icon": "generic/api"}
+      ]},
+      {"id": "ingest", "title": "2. Ingestion & Orchestration", "children": [
+        {"id": "adf", "name": "Azure Data Factory", "desc": ["Scheduled pipelines", "Incremental loads"], "icon": "azure/data-factories"},
+        {"id": "lake", "name": "Azure Data Lake Gen2", "desc": "Bronze / Silver / Gold", "icon": "azure/data-lake-storage-gen1"}
+      ]},
+      {"id": "ai", "title": "3. Analytics & AI", "weight": 1.8, "children": [
+        {"dir": "row", "children": [
+          {"id": "feat", "title": "Feature Engineering", "children": [
+            {"id": "dbx", "name": "Azure Databricks", "desc": "Spark notebooks", "icon": "azure/azure-databricks"}
+          ]},
+          {"id": "model", "title": "Scoring & Rules", "children": [
+            {"id": "ml", "name": "Azure ML", "desc": "Model scoring", "icon": "azure/machine-learning"}
+          ]}
+        ]},
+        {"id": "explain", "title": "AI Explanation", "dir": "row", "children": [
+          {"id": "aoai", "name": "Azure OpenAI", "desc": "Natural-language summaries", "icon": "azure/azure-openai"}
+        ]}
+      ]},
+      {"id": "consume", "title": "4. Business Consumption", "children": [
+        {"id": "pbi", "name": "Power BI", "desc": "Dashboards & KPIs", "icon": "brand/power-bi"},
+        {"id": "teams", "name": "Microsoft Teams", "desc": "Alerts & approvals", "icon": "brand/teams"}
+      ]}
+    ]},
+    {"id": "gov", "title": "5. Data Governance & Security", "dir": "row", "children": [
+      {"id": "entra", "name": "Microsoft Entra ID", "desc": "SSO & RBAC", "icon": "azure/entra-id"},
+      {"id": "kv", "name": "Azure Key Vault", "desc": "Secrets", "icon": "azure/key-vaults"},
+      {"id": "purview", "name": "Microsoft Purview", "desc": "Lineage & catalog", "icon": "azure/purview"}
+    ]},
+    {"dir": "row", "children": [
+      {"id": "orch", "title": "6. Orchestration & Actions", "dir": "row", "weight": 4, "children": [
+        {"id": "logic", "name": "Azure Logic Apps", "desc": "Approval workflow", "icon": "azure/logic-apps"},
+        {"id": "writeback", "name": "ERP Write-back", "desc": "Post approved actions", "icon": "generic/sync"}
+      ]},
+      {"legend": true}
+    ]}
+  ]},
+  "flows": [
+    {"from": "sources", "to": "ingest", "type": "data", "step": 1},
+    {"from": "ingest", "to": "ai", "type": "data", "step": 2},
+    {"from": "ai", "to": "consume", "type": "analytics", "step": 3},
+    {"from": "pipeline", "to": "gov", "type": "analytics", "both": true},
+    {"from": "gov", "to": "orch", "type": "action", "both": true}
+  ]
+}

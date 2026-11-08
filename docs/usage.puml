@@ -1,0 +1,80 @@
+@startuml arch-slide-usage
+title arch-slide - how a user runs it
+autonumber
+skinparam sequenceMessageAlign left
+skinparam responseMessageBelowArrow true
+
+actor "User" as U
+participant "Claude\n(arch-slide skill)" as C
+participant "build.py" as B
+database "./arch-work\n(local only)" as W
+database "~/.arch-slide/styles" as S
+participant "PowerPoint or\nLibreOffice" as L
+
+U -> C : /arch-slide:arch-slide\nSOW / idea deck (or pasted text)\n+ style source: org PPTX | screenshots | words | saved style
+note over W : SOW content never leaves the machine
+
+== Checkpoint 1 - Understand + choose stack ==
+C -> B : text SOW.pptx
+B --> C : slide text, tables, notes
+C -> W : 01-brief.md\n(problem, systems, assumptions,\nAzure / AWS / hybrid options)
+C -> U : summary + stack options (multiple choice)
+loop until approved
+  U -> C : corrections / pick stack
+  C -> W : update 01-brief.md
+end
+
+== Checkpoint 2 - Numbered flow ==
+C -> W : 02-flow.md (numbered messages + sequence diagram)
+C -> U : flow + "where do you need more depth?"
+loop until user says okay
+  U -> C : add auth / approval / write-back / errors / monitoring
+  C -> W : update 02-flow.md
+end
+
+== Checkpoint 3 - Org style ==
+C -> S : look for a saved style
+alt saved style found
+  C -> U : reuse {org}? (style summary)
+  U -> C : yes
+else new style
+  alt org PPTX given
+    C -> B : template deck.pptx --slide N
+    B -> S : {org}/base.pptx (chrome moved into layout)
+    C -> B : style deck.pptx --slide M
+    B --> C : draft tokens (colours, fonts, sizes)
+  else screenshots or words only
+    C -> C : write tokens from images / words\n(mark estimates)
+  end
+  opt screenshots disagree
+    C -> U : which one is the standard?
+    U -> C : pick one
+  end
+  C -> S : {org}/style.json
+  C -> B : build examples/sample.json --style {org}
+  C -> B : preview
+  B -> L : render
+  L --> C : sample PNG
+  C -> U : style summary + sample image
+  U -> C : confirm / adjust
+end
+
+== Checkpoint 4 - Build the slide ==
+C -> W : arch-spec.json (box tree + flows numbered from 02-flow)
+loop until preview is clean
+  C -> B : build arch-spec.json --style {org}
+  B -> W : {UseCase}-Architecture.pptx
+  B --> C : report (errors, missing icons, overflow, icons used)
+  C -> B : preview
+  B -> L : render
+  L --> C : PNG
+  C -> C : check overlaps, clipped text, placeholders\nshorten text / rebalance weights
+end
+C -> U : preview + file path\n+ missing icons + assumptions to check
+
+opt user wants changes
+  U -> C : "move X", "rename Y", "add a detail slide"
+  C -> B : rebuild (same loop)
+  C -> U : updated preview
+end
+@enduml

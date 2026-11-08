@@ -1,0 +1,8 @@
+{
+  "name": "arch-slide",
+  "version": "0.1.0",
+  "description": "Turn a SOW or idea deck into an editable, architecture-only PowerPoint slide in your organisation's own style.",
+  "author": { "name": "pratapsdev11", "url": "https://github.com/pratapsdev11" },
+  "repository": "https://github.com/pratapsdev11/arch-slide",
+  "keywords":["architecture", "powerpoint", "pptx", "diagram", "sow", "presales"]
+}
