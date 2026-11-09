@@ -70,13 +70,25 @@ Either derive them from the sequence diagram (preferred):
 - Messages between the same two boxes merge into one arrow labelled with all their step numbers (`6 · 10 · 16`).
   Two-way traffic gets heads at both ends.
 - Self-messages and unmapped participants are reported by the `unused-messages` rule.
-- `flowOptions.level`: `node` (default), `card` or `zone`. This lifts arrows up to the containers: one arrow per
-  pair of blocks, and messages inside one block are collapsed (not reported).
-- `flowOptions.labels`: `steps` (default: arrows carry their step numbers) or `none` (plain arrows; the step
-  numbers are still checked by `traceability`, just not drawn). Override labels still show as short text.
-- The org's style can set `flowOptions` too (e.g. `{"level": "card", "labels": "none"}` for "few, plain,
-  block-to-block arrows"). The spec's `flowOptions` override it for one project. Don't list flows by hand to get
-  this look.
+- `flowOptions.level`:
+  - `node` (default): every arrow joins two services;
+  - `nested`: each message is drawn where its two ends part. Different columns give one hand-off arrow between
+    the columns; different layers (cards) in one column give an arrow between the layers; two services in one
+    layer give a small arrow between them. This is the layered reference look: one story per level, few
+    crossings;
+  - `card` / `zone`: lift every arrow to the cards or columns. Messages inside one block are collapsed (not
+    reported). This is coarse, and good for an overview slide only.
+- `flowOptions.labels`:
+  - `steps` (default): arrows carry their step numbers;
+  - `none`: no numbers. Numbers are still checked by `traceability`, just not drawn. Arrows between two columns
+    show their override `label` + `note`, or else the first message's text, shortened. Inner arrows stay
+    unlabelled.
+- The org's style can set `flowOptions` too, and the spec's `flowOptions` override it for one project. Never list
+  flows by hand to get a look. Example of a style setting: `{"level": "nested", "labels": "none"}`.
+- With `nested`, a column is a stack of 2-4 **layer cards**. Each layer does one job and lays its 1-4 services
+  out in a row (`"dir": "row"`), so the flow inside reads left to right. Give every column-to-column arrow a 1-2
+  word verb `label` and a `note` of what moves, in `overrides` with `from`/`to` = the two zone ids. The gutter
+  widens to fit the label.
 - `flowOptions.default`: the flow type to use (a key in the style's `flows`). `overrides`: per pair `type`, `label`, `note`.
 
 Or list them explicitly: `[{"from", "to", "type"?, "both"?, "step"? | "steps"?, "label"?, "note"?}]` (no `type` =

@@ -36,7 +36,13 @@ sequence diagram (`02-flow.mmd`) are approved. Your job is the spec and a clean 
    - cross-cutting platform services (identity, secrets, monitoring) go in a full-width bottom band **without
      arrows**: give those nodes no `participants`. Their messages show up as `unused-messages`: accept them and
      list them in the reply. Draw them only if the user asked to see those flows;
-   - aim for ≤ 15 arrows. More than that: `"flowOptions": {"level": "card"}` or an overview + detail slide;
+   - with `"level": "nested"` (layered styles):
+     - each column is a stack of 2-4 layer cards. Each layer does one job and holds 1-4 services in a row
+       (`"dir": "row"`). Never pile 4+ services into one tall card: that collapses the arrows and leaves the slide
+       empty;
+     - give every column-to-column arrow `overrides` with a 1-2 word verb `label` and a `note` of what moves;
+     - fill the slide: 1-2 line descriptions, and nothing left floating in a half-empty card;
+   - aim for ≤ 15 arrows. More than that: an overview + detail slide;
    - after the first build, if `arrow-crossings` > 3, reorder the columns and cards before you touch anything else.
 2. Build and preview in one command:
    `B build <work>/arch-spec.json --style <org> -o "<deliverable>" --preview <work>/preview`

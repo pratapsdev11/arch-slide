@@ -45,11 +45,20 @@ def parse(text):
     return {"participants": list(parts.values()), "messages": msgs}
 
 
-def derive_flows(seq, owner, lift, opts):
+def _short(text, n=26):
+    t = text.strip().rstrip(".")
+    if len(t) > n:
+        t = t[:n].rsplit(" ", 1)[0]
+    return t[:1].upper() + t[1:]
+
+
+def derive_flows(seq, owner, lift, opts, tops=()):
     """Turn messages into flows between boxes.
 
     owner: participant id -> node id (from each node's "participants" list)
-    lift:  node id -> the box id to draw the arrow at (node, card or zone level)
+    lift:  (node id, node id) -> the two box ids to draw the arrow between (node, card, zone or nested level)
+    tops:  ids of the top-level columns; with labels "none", an arrow between two columns with no override label
+           gets the first message's text, shortened, so the main hand-offs still say what they are
     opts:  {"level": node|card|zone, "labels": steps|none, "default": type, "overrides": [{from, to, type?, label?, note?}]}
            labels "none": plain arrows; step numbers are kept on the flow for traceability but not drawn.
     Returns (flows, skipped messages)."""
@@ -60,7 +69,7 @@ def derive_flows(seq, owner, lift, opts):
         if a is None or b is None:
             skipped.append({"n": msg["n"], "why": f"participant {msg['from'] if a is None else msg['to']} not on the slide"})
             continue
-        a, b = lift(a), lift(b)
+        a, b = lift(a, b)
         if a == b:
             if not block:
                 skipped.append({"n": msg["n"], "why": "inside one box"})
@@ -76,7 +85,10 @@ def derive_flows(seq, owner, lift, opts):
         o = over.get((f["from"], f["to"])) or over.get((f["to"], f["from"])) or {}
         steps = " · ".join(str(n) for n in f["steps"])
         plain = opts.get("labels") == "none"
-        label = o.get("label") if plain else (f"{steps}. {o['label']}" if o.get("label") else steps)
+        if plain:
+            label = o.get("label") or (_short(f["texts"][0]) if f["from"] in tops and f["to"] in tops else None)
+        else:
+            label = f"{steps}. {o['label']}" if o.get("label") else steps
         flows.append({
             "from": f["from"], "to": f["to"], "type": o.get("type", opts.get("default", "data")),
             "both": len(f["dirs"]) > 1, "steps": f["steps"], "plain": plain, "label": label,
@@ -101,7 +113,7 @@ if __name__ == "__main__":  # self-check
     assert [p["id"] for p in s["participants"]] == ["A", "U", "DB"], s
     assert [m["n"] for m in s["messages"]] == [1, 2, 3, 4]
     assert s["messages"][1]["reply"] and s["messages"][1]["block"] == "alt bad password"
-    flows, skipped = derive_flows(s, {"A": "app", "U": "user", "DB": "db"}, lambda x: x, {})
+    flows, skipped = derive_flows(s, {"A": "app", "U": "user", "DB": "db"}, lambda x, y: (x, y), {})
     assert {(f["from"], f["to"], f["both"]) for f in flows} == {("user", "app", True), ("app", "db", False)}
     assert skipped == [{"n": 3, "why": "inside one box"}]
     print("ok")

@@ -32,7 +32,7 @@ Or just ask: *"make an architecture slide for the third use case in this deck"*.
 
 | Layer | What it does |
 |---|---|
-| **Sequence** (`seq.py`) | Parses the Mermaid `sequenceDiagram`. Messages become arrows between the boxes that own each participant. Steps between the same two boxes merge into one arrow (`6 · 10 · 16`). An org can choose fewer, plain arrows between blocks instead (`flowOptions`: `level: card`, `labels: none`). Nothing is retyped, so traceability holds by construction. |
+| **Sequence** (`seq.py`) | Parses the Mermaid `sequenceDiagram`. Messages become arrows between the boxes that own each participant. Steps between the same two boxes merge into one arrow (`6 · 10 · 16`). An org can choose the layered look instead (`flowOptions`: `level: nested`, `labels: none`): labelled hand-offs between columns, short arrows between layers and between the services inside a layer, no numbers. Nothing is retyped, so traceability holds by construction. |
 | **Measure** (`layout.py`) | Text is measured with the real font file and wrapped the way PowerPoint wraps it. The report says when a font is missing and it had to estimate. |
 | **Layout** (`engine.py`) | Every box first gets the height its content needs. Leftover space is shared by `weight`. Icons are a fixed multiple of the name font, so they stay consistent. Supports zones, cards, boxed nodes and dashed **trust boundaries**. |
 | **Auto-align** (`engine.py`) | A second layout pass slides each node level with the boxes it connects to beside it (isotonic regression over the free space in its card). Arrows come out straight with no hand-tuning, and cards end where their content ends. |

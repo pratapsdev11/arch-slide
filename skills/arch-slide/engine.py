@@ -355,8 +355,17 @@ def _spread(col, anchored):
 
 
 def wide_gaps(ctx, flows):
-    """{container id: {i}}: children i and i+1 are joined by an arrow, so the gap between them must fit one."""
-    wide = {}
+    """{container id: {i: width}}: children i and i+1 are joined by an arrow, so the gap between them must fit one
+    (and, between side-by-side boxes, its label)."""
+    wide, s = {}, ctx["style"]
+
+    def need(f, row):
+        if not (row and f.get("label")):
+            return FLOW_GAP
+        w = L.text_width(f["label"], s["font"], fs(s, s["sizes"]["name"]), True) + 0.16
+        if f.get("note"):
+            w = max(w, min(1.1, L.text_width(f["note"], s["font"], fs(s, s["sizes"]["desc"])) + 0.16))
+        return min(1.2, max(FLOW_GAP, w))
 
     def chain(n):  # the box, then each container up to the zone
         return [n, *reversed(ctx["info"][n]["ancestors"])] if n in ctx["info"] else []
@@ -366,7 +375,9 @@ def wide_gaps(ctx, flows):
             for b in chain(f.get("to")):
                 ka, kb = ctx["kidx"].get(a), ctx["kidx"].get(b)
                 if ka and kb and ka[0] == kb[0] and abs(ka[1] - kb[1]) == 1:
-                    wide.setdefault(ka[0], set()).add(min(ka[1], kb[1]))
+                    gaps = wide.setdefault(ka[0], {})
+                    j = min(ka[1], kb[1])
+                    gaps[j] = max(gaps.get(j, 0.0), need(f, ka[2]))
     return wide
 
 
@@ -470,13 +481,13 @@ def arrange(ctx, box, x, y, w, h, depth, anc, parent, fit=False):
     pre = [0.0] * len(kids)
     for i, k in enumerate(kids):  # which box sits where, so arrows between neighbours can widen their gap
         if k.get("id") or k.get("name"):
-            ctx["kidx"][k.get("id") or k["name"]] = (bid, i)
-    wide = ctx["wide"].get(bid, set())
-    add = max(0.0, FLOW_GAP - gap) if wide else 0.0
-    if add and not row and bid not in ctx["align"]:  # a stacked column widens only into its free space
+            ctx["kidx"][k.get("id") or k["name"]] = (bid, i, row)
+    adds = {j: max(0.0, need - gap) for j, need in ctx["wide"].get(bid, {}).items()}
+    if adds and not row and bid not in ctx["align"]:  # a stacked column widens only into its free space
         room = h - sum(min_h(ctx, k, w, depth) for k in kids) - gap * (len(kids) - 1)
-        add = min(add, max(0.0, room) / len(wide))
-    gaps = [gap + add if j in wide else gap for j in range(len(kids) - 1)]
+        k_ = min(1.0, max(0.0, room) / sum(adds.values())) if sum(adds.values()) else 1.0
+        adds = {j: v * k_ for j, v in adds.items()}
+    gaps = [gap + adds.get(j, 0.0) for j in range(len(kids) - 1)]
     if row:
         sizes = split_row(kids, w, gaps)
     elif bid in ctx["align"]:  # second pass: nodes at their min height, moved into line with their partners
@@ -617,6 +628,26 @@ def lift(ctx, bid, level):
     return bid
 
 
+def lift_pair(ctx, a, b, level):
+    """Where to draw a message between boxes a and b. "nested": where their containers part, so the arrow joins two
+    columns, two layers (cards) inside one column, or two services inside one layer."""
+    if level != "nested":
+        return lift(ctx, a, level), lift(ctx, b, level)
+    ca = [*ctx["info"][a]["ancestors"], a] if a in ctx["info"] else [a]
+    cb = [*ctx["info"][b]["ancestors"], b] if b in ctx["info"] else [b]
+    i = 0
+    while i < min(len(ca), len(cb)) and ca[i] == cb[i]:
+        i += 1
+    if i >= len(ca) or i >= len(cb):  # one contains the other (or the same box)
+        return a, b
+
+    def visible(c):  # skip invisible groups: an arrow needs a drawn box at each end
+        return next((x for x in c[i:] if ctx["info"].get(x, {}).get("kind") in ("zone", "card", "node", "boundary")),
+                    c[-1])
+
+    return visible(ca), visible(cb)
+
+
 def steps_of(f):
     if f.get("steps"):
         return list(f["steps"])
@@ -636,7 +667,9 @@ def resolve_flows(ctx, spec, spec_dir):
             ctx["spec_errors"].append('"flows": "from-sequence" needs "sequence": "<file.mmd>"')
             return [], None, []
         owner = {p: bid for bid, parts in ctx["participants"].items() for p in parts}
-        flows, skipped = S.derive_flows(seqd, owner, lambda b: lift(ctx, b, opts.get("level", "node")), opts)
+        tops = {b["id"] for b in ctx["boxes"] if b["kind"] == "zone" and b["depth"] == 0}
+        flows, skipped = S.derive_flows(seqd, owner, lambda a, b: lift_pair(ctx, a, b, opts.get("level", "node")),
+                                        opts, tops)
     else:  # hand-listed flows: missing type = the default type; "labels": "none" applies to them too
         types = ctx["style"]["flows"]
         dflt = opts.get("default") if opts.get("default") in types else next(iter(types))

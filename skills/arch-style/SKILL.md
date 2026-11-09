@@ -36,8 +36,13 @@ Ask for the org name (used as the folder name). If screenshots disagree with eac
   - `colors{...}`: `panelFill` / `panelBorder` set to `null` give borderless columns under header bars;
   - `gap[...]`, `node{iconLeft, iconTop, iconLeftMinWidth}`, `content{...}`;
   - `flows{<type>: {color, label, dash?}}` (dash: `dash`, `round_dot`, `long_dash`, ...), `legend{title}`;
-  - `flowOptions{level: node|card|zone, labels: steps|none}`: the org's arrow convention. For example, "arrows join
-    blocks, not services, and carry no numbers" is `{"level": "card", "labels": "none"}`;
+  - `flowOptions{level: node|nested|card|zone, labels: steps|none}`: the org's arrow convention. Read it off the
+    screenshots:
+    - labelled hand-offs between columns plus small arrows inside layers, no numbers = `{"level": "nested",
+      "labels": "none"}`;
+    - every service wired to every service with numbers = the default.
+
+    Put the layering habit (layer cards with services in a row) in `_notes`;
   - no template: `chrome{accentBar, accentColor, footerBand (height in), footerColor, footerText, logo}`;
   - icons above names everywhere: `node.iconLeftMinWidth: 99`.
 

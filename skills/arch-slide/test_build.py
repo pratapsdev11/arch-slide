@@ -95,10 +95,34 @@ def test_sequence_flows(tmp):
     spec["flowOptions"] = {"level": "zone", "labels": "none"}
     (tmp / "seq.json").write_text(json.dumps(spec), encoding="utf-8")
     rep = run("build", str(tmp / "seq.json"), "-o", str(tmp / "plain.pptx"))
-    names = [sh.name for sh in Presentation(str(tmp / "plain.pptx")).slides[0].shapes]
+    shapes = Presentation(str(tmp / "plain.pptx")).slides[0].shapes
+    names = [sh.name for sh in shapes]
     assert sorted(n for n in names if n.startswith("flow:")) == ["flow:app->data", "flow:users->app"], names
-    assert not [n for n in names if n.startswith(("label:", "step:"))], names
+    assert not [n for n in names if n.startswith("step:")], names
+    # column-to-column arrows say what moves (first message, no numbers)
+    assert {sh.text_frame.text for sh in shapes if sh.name.startswith("label:")} == {"Submit", "Save"}, names
     assert not issues(rep, "traceability") and not issues(rep, "unused-messages"), issues(rep)
+
+    # nested: an arrow between columns, between layers inside a column, between services inside a layer
+    spec["flowOptions"] = {"level": "nested", "labels": "none"}
+    spec["root"]["children"][1]["children"] = [
+        {"id": "front", "title": "Front", "children": [{"id": "api", "name": "API", "participants": ["API"]}]},
+        {"id": "back", "title": "Back", "dir": "row", "children": [{"id": "db", "name": "Database", "participants": ["DB"]},
+                                                                  {"id": "x", "name": "Cache", "participants": ["X"]}]}]
+    spec["root"]["children"].pop(2)
+    (tmp / "flow.mmd").write_text("""sequenceDiagram
+    participant U
+    participant API
+    participant DB
+    participant X
+    U->>API: submit
+    API->>DB: save
+    DB->>X: warm
+""", encoding="utf-8")
+    (tmp / "seq.json").write_text(json.dumps(spec), encoding="utf-8")
+    run("build", str(tmp / "seq.json"), "-o", str(tmp / "nested.pptx"))
+    names = {sh.name for sh in Presentation(str(tmp / "nested.pptx")).slides[0].shapes}
+    assert {"flow:users->app", "flow:front->back", "flow:db->x"} <= names, names
 
 
 def test_rules_from_org_and_project(tmp):
