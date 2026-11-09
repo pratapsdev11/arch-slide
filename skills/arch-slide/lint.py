@@ -24,6 +24,7 @@ DEFAULT_RULES = {
     "arrow-through-box": {"severity": "error"},
     "arrow-crossings":   {"severity": "warn", "max": 2},
     "arrow-bends":       {"severity": "warn", "max": 3},
+    "short-arrow":       {"severity": "warn", "min": 0.25},                # inches; shorter reads as a lone arrowhead
     "label-collision":   {"severity": "warn"},
     "safe-area":         {"severity": "error"},
     "density":           {"severity": "warn", "maxNodes": 40, "maxColumns": 6},
@@ -155,7 +156,7 @@ def r_arrow_through(m, c):
     for r in m["routes"]:
         for p, q in segments(r["pts"]):
             for b in m["boxes"]:
-                if b["kind"] in ("node", "card", "zone", "legend", "header", "boundary") and not b.get("ghost") and \
+                if b["kind"] in ("node", "card", "legend", "header", "boundary") and \
                         (b["kind"] == "header" or b["id"] not in r["exempt"]) and seg_hits_rect(p, q, b["rect"]):
                     yield r["id"], f"arrow passes through {b['id']}", "re-arrange so the path is clear"
                     break
@@ -172,6 +173,13 @@ def r_bends(m, c):
     for r in m["routes"]:
         if len(r["pts"]) - 2 > c["max"]:
             yield r["id"], f"{len(r['pts']) - 2} bends (max {c['max']})", "place the two boxes nearer each other"
+
+
+def r_short_arrow(m, c):
+    for r in m["routes"]:
+        n = sum(abs(p[0] - q[0]) + abs(p[1] - q[1]) for p, q in segments(r["pts"]))
+        if n < c["min"]:
+            yield r["id"], f"arrow is only {n:.2f} in long (min {c['min']})",                 "give the card more height (weight), fewer nodes, or put the two nodes side by side"
 
 
 def r_label_collision(m, c):
@@ -249,7 +257,7 @@ CHECKS = {
     "desc-lines": r_desc_lines, "name-chars": r_name_chars, "desc-chars": r_desc_chars,
     "icon-ratio": r_icon_ratio, "icon-consistency": r_icon_consistency, "missing-icon": r_missing_icon,
     "generic-icon": r_generic_icon, "unrouted-flow": r_unrouted, "arrow-through-box": r_arrow_through,
-    "arrow-crossings": r_crossings, "arrow-bends": r_bends, "label-collision": r_label_collision,
+    "arrow-crossings": r_crossings, "arrow-bends": r_bends, "short-arrow": r_short_arrow, "label-collision": r_label_collision,
     "safe-area": r_safe_area, "density": r_density, "nodes-per-card": r_nodes_per_card, "contrast": r_contrast,
     "traceability": r_traceability, "unused-messages": r_unused_messages, "legend": r_legend,
     "title-case": r_title_case, "boundary-label": r_boundary_label,

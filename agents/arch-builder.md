@@ -25,6 +25,17 @@ sequence diagram (`02-flow.mmd`) are approved. Your job is the spec and a clean 
      `"iconStandIn": true`;
    - follow the style's `_notes` (subtitles, cards, label style);
    - mark assumed components `(assumed)` exactly as the brief does.
+
+   Layout rules (most messy slides break one of these):
+   - put every box in the column next to the boxes it exchanges the most messages with. An arrow that has to jump
+     over a whole column is a layout bug;
+   - a store that several columns write to or read from (data lake, log, warehouse) goes in a full-width band
+     under the columns, not in a far column;
+   - cross-cutting platform services (identity, secrets, monitoring) go in a full-width bottom band **without
+     arrows**: give those nodes no `participants`. Their messages show up as `unused-messages`: accept them and
+     list them in the reply. Draw them only if the user asked to see those flows;
+   - aim for ≤ 15 arrows. More than that: `"flowOptions": {"level": "card"}` or an overview + detail slide;
+   - after the first build, if `arrow-crossings` > 3, reorder the columns and cards before you touch anything else.
 2. Build and preview in one command:
    `B build <work>/arch-spec.json --style <org> -o "<deliverable>" --preview <work>/preview`
    The output is a short summary. Each issue ends in `-> fix`.

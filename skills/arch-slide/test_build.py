@@ -114,7 +114,7 @@ def test_align(tmp):
             {"id": f"a{i}", "name": f"Node {i}"} for i in range(1, 5)]}]},
         {"id": "R", "title": "Right", "children": [{"id": "cb", "title": "Card B", "children": [
             {"id": "b", "name": "Bee"}]}]}]},
-        "flows": [{"from": "b", "to": "a3", "type": "data"}]}
+        "flows": [{"from": "b", "to": "a3", "type": "data"}, {"from": "a3", "to": "a4", "type": "data"}]}
     (tmp / "align.json").write_text(json.dumps(spec), encoding="utf-8")
     rep = run("build", str(tmp / "align.json"), "-o", str(tmp / "align.pptx"))
     assert rep["ok"], issues(rep)
@@ -122,6 +122,8 @@ def test_align(tmp):
     mid = lambda s: s.top + s.height / 2  # noqa: E731
     assert abs(mid(sh["node:b"]) - mid(sh["node:a3"])) < Inches(0.05), (mid(sh["node:b"]), mid(sh["node:a3"]))
     assert type(sh["flow:b->a3"]).__name__ == "Connector"  # 2 points: a straight arrow
+    gap = sh["node:a4"].top - (sh["node:a3"].top + sh["node:a3"].height)
+    assert gap >= Inches(0.28), gap / 914400  # linked nodes stacked in a card leave room for a visible arrow
     card = sh["card:cb"]
     assert card.top <= sh["node:b"].top and sh["node:b"].top + sh["node:b"].height <= card.top + card.height
 

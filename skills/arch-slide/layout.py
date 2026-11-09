@@ -165,10 +165,11 @@ def _ports(r, other):
     return [((px, y), 0), ((x + w, py), 1), ((px, y + h), 2), ((x, py), 3)]
 
 
-def route(src, dst, obstacles, used, bounds, cell=0.04, turn=10, crowd=6, hug=2, soft=()):
+def route(src, dst, obstacles, used, bounds, cell=0.04, turn=10, crowd=6, hug=2, soft=(), cross=()):
     """Orthogonal path from an edge of `src` to an edge of `dst` avoiding `obstacles` (rects).
     `used` counts grid cells taken by earlier routes; sharing them costs extra, so routes spread out.
     `soft` rects may be crossed, but running along their border costs extra.
+    `cross` rects (other columns) may be crossed, at double the cost of open space, so gutters come first.
     Returns a list of points, or None when no path exists."""
     bx, by, bw, bh = bounds
     nx, ny = int(bw / cell), int(bh / cell)
@@ -210,6 +211,9 @@ def route(src, dst, obstacles, used, bounds, cell=0.04, turn=10, crowd=6, hug=2,
                 blocked.add((i, j))
     # cells hugging an obstacle cost extra, so arrows prefer open gutters to slivers between boxes
     near = {(i + dx, j + dy) for (i, j) in blocked for dx, dy in DIRS} - blocked
+    inner = set()
+    for (x, y, w, h) in cross:
+        inner |= {(i, j) for i in range(ci(x), ci(x + w) + 1) for j in range(cj(y), cj(y + h) + 1)}
     for (x, y, w, h) in soft:  # a 3-cell band along each border
         i0, i1, j0, j1 = ci(x), ci(x + w), cj(y), cj(y + h)
         for k in (-1, 0, 1):
@@ -263,7 +267,7 @@ def route(src, dst, obstacles, used, bounds, cell=0.04, turn=10, crowd=6, hug=2,
             ni, nj = i + dx, j + dy
             if not (0 <= ni < nx and 0 <= nj < ny) or (ni, nj) in blocked:
                 continue
-            ng = g + 1 + (turn if nd != d else 0) + crowd * used.get((ni, nj), 0) + (hug if (ni, nj) in near else 0)
+            ng = g + 1 + (turn if nd != d else 0) + crowd * used.get((ni, nj), 0) + (hug if (ni, nj) in near else 0) + ((ni, nj) in inner)
             ns = (ni, nj, nd)
             if ng < best.get(ns, 1e18):
                 best[ns], prev[ns] = ng, s

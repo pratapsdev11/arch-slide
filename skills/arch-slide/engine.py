@@ -321,37 +321,43 @@ def _isotonic(t, w):
     return [v for v, _, n in blocks for _ in range(n)]
 
 
+FLOW_GAP = 0.3  # room for a visible arrow (and its step number) between two linked nodes stacked in one card
+
+
 def _spread(col, anchored):
-    """Children with no partner beside them: evenly spaced between the anchored ones, packed from the top,
-    and the ones after the last anchor keep the column's rhythm."""
-    y1, g, mins, top, n = col["y"] + col["h"], col["gap"], col["mins"], col["top"], len(col["mins"])
+    """Children with no partner beside them: spread between the anchored ones (each gap = its minimum + an equal
+    share of the free space), packed from the top; those after the last anchor keep the column's rhythm."""
+    y0, y1, gp, mins, top, n = col["y"], col["y"] + col["h"], col["gp"], col["mins"], col["top"], len(col["mins"])
     idx = sorted(anchored)
 
-    def lay(first, stop, start, step):
+    def lay(first, stop, start, extra):
         pos = start
         for i in range(first, stop):
             top[i] = pos
-            pos += mins[i] + step
+            pos += mins[i] + (gp[i] if i < n - 1 else 0) + extra
 
+    if not idx:  # only vertical links in this column: pack from the top with a modest, even spacing
+        lay(0, n, y0, min(0.25, (col["h"] - sum(mins) - sum(gp)) / max(1, n - 1)))
+        return
     a = idx[0]
     if a:
-        lay(0, a, col["y"], (top[a] - col["y"] - sum(mins[:a])) / a)
+        lay(0, a, y0, (top[a] - y0 - sum(mins[:a]) - sum(gp[:a])) / a)
     for a, b in zip(idx, idx[1:]):
         if b - a > 1:
-            step = (top[b] - top[a] - sum(mins[a:b])) / (b - a)
-            lay(a + 1, b, top[a] + mins[a] + step, step)
+            extra = (top[b] - top[a] - sum(mins[a:b]) - sum(gp[a:b])) / (b - a)
+            lay(a + 1, b, top[a] + mins[a] + gp[a] + extra, extra)
     last = idx[-1]
     if last < n - 1:
-        gaps = [top[i + 1] - top[i] - mins[i] for i in range(last)]
-        step = min(max(g, statistics.median(gaps)) if gaps else g,
-                   (y1 - top[last] - sum(mins[last:])) / (n - 1 - last))
-        lay(last + 1, n, top[last] + mins[last] + step, step)
+        extras = [top[j + 1] - top[j] - mins[j] - gp[j] for j in range(last)]
+        avail = y1 - top[last] - sum(mins[last:]) - sum(gp[last:])
+        extra = max(0.0, min(statistics.median(extras) if extras else 0.0, avail / (n - 1 - last)))
+        lay(last + 1, n, top[last] + mins[last] + gp[last] + extra, extra)
 
 
 def align_offsets(ctx, flows, sweeps=4):
     """For every column of nodes (a card's node list), place each node as close as possible to the height of
-    the boxes it connects to beside it, keeping order, min heights and gaps. Frames never move: only the free
-    space inside each column is redistributed.
+    the boxes it connects to beside it, keeping order, min heights and gaps; two linked nodes stacked in the
+    column get FLOW_GAP between them. Frames never move: only the free space inside each column is redistributed.
     Returns {container id: (child heights, gap before each child, unused height at the bottom)}."""
     rects, cols = ctx["rects"], ctx["cols"]
     centre = {k: r[1] + r[3] / 2 for k, r in rects.items()}
@@ -362,28 +368,36 @@ def align_offsets(ctx, flows, sweeps=4):
         return ax + aw <= bx or bx + bw <= ax
 
     edges = [(f["from"], f["to"]) for f in flows if f.get("from") in rects and f.get("to") in rects]
+    linked = {(home[a][0], *sorted((home[a][1], home[b][1]))) for a, b in edges
+              if a in home and b in home and home[a][0] == home[b][0]}
+    for ci, col in enumerate(cols):
+        g, n = col["gap"], len(col["mins"])
+        links = [j for j in range(n - 1) if (ci, j, j + 1) in linked]
+        room = col["h"] - sum(col["mins"]) - g * (n - 1)  # what a tight card can spare for its arrows
+        extra = min(max(0.0, FLOW_GAP - g), max(0.0, room) / max(1, len(links)))
+        col["gp"] = [g + extra if j in links else g for j in range(n - 1)]
     done = set()
     for _ in range(sweeps):  # Gauss-Seidel: each column sees the columns already moved in this sweep
         for ci, col in enumerate(cols):
-            mins, gap, n = col["mins"], col["gap"], len(col["mins"])
-            spare = col["h"] - sum(mins) - gap * (n - 1)
+            mins, gp, n = col["mins"], col["gp"], len(col["mins"])
+            spare = col["h"] - sum(mins) - sum(gp)
             want = [[] for _ in range(n)]
             for a, b in edges:
                 for u, v in ((a, b), (b, a)):
                     if home.get(u, (-1,))[0] == ci and home.get(v, (-1,))[0] != ci and beside(u, v):
                         want[home[u][1]].append(centre[v])
-            if spare <= 0 or not any(want):
+            if spare < -1e-9 or not (any(want) or gp != [col["gap"]] * (n - 1)):
                 continue
             t, w, acc = [], [], 0.0
             for i in range(n):  # children with no partner beside them hold their place, weakly
                 top = statistics.median(want[i]) - mins[i] / 2 if want[i] else col["top"][i]
                 t.append(top - acc)
                 w.append(len(want[i]) or 0.01)
-                acc += mins[i] + gap
+                acc += mins[i] + (gp[i] if i < n - 1 else 0)
             acc = 0.0
             for i, z in enumerate(_isotonic(t, w)):
                 col["top"][i] = min(max(z, col["y"]), col["y"] + spare) + acc
-                acc += mins[i] + gap
+                acc += mins[i] + (gp[i] if i < n - 1 else 0)
             _spread(col, {i for i in range(n) if want[i]})
             for i in range(n):
                 for nid in col["ids"][i]:
@@ -469,8 +483,7 @@ def draw_panel(ctx, box, bid, kind, x, y, w, h, depth, anc, parent):
                    width=p["border"], radius=p["radius"], name=f"{kind}:{bid}")
     if p["shadow"] and top:
         add_shadow(sh)
-    record(ctx, bid, kind, (x, y, w, h), depth, anc, parent, title=box.get("title"),
-           ghost=top and not (fill or line))
+    record(ctx, bid, kind, (x, y, w, h), depth, anc, parent, title=box.get("title"))
     if bar:
         hb = box_shape(shapes, MSO_SHAPE.ROUND_2_SAME_RECTANGLE, x, y, w, hh, fill=c["primary"],
                        radius=p["radius"], name=f"header:{bid}")
@@ -603,10 +616,12 @@ def resolve_flows(ctx, spec, spec_dir):
 
 def route_flows(ctx, flows, W, H):
     s, m = ctx["style"], ctx["style"]["content"]
-    bounds = (max(0, m["left"] - 0.25), max(0, ctx["top"] - 0.1),
-              min(W, W - m["right"] + 0.25) - max(0, m["left"] - 0.25), H - m["bottom"] + 0.1 - max(0, ctx["top"] - 0.1))
-    blockers = [b for b in ctx["boxes"] if b["kind"] in ("node", "card", "zone", "legend", "header", "boundary")
-                and not b.get("ghost")]  # an invisible zone body can be crossed; its header bar can't
+    # arrows stay in the content area: above the zones they cut through the title, below it into the footer
+    bounds = (max(0, m["left"] - 0.25), ctx["top"],
+              min(W, W - m["right"] + 0.25) - max(0, m["left"] - 0.25), H - m["bottom"] - ctx["top"])
+    # a column (zone) body may be crossed between its cards, at a small cost; its header bar never
+    blockers = [b for b in ctx["boxes"] if b["kind"] in ("node", "card", "legend", "header", "boundary")]
+    zones = [b for b in ctx["boxes"] if b["kind"] == "zone"]
     used, routes = {}, []
     valid = [f for f in flows if f.get("from") in ctx["rects"] and f.get("to") in ctx["rects"]
              and f.get("type") in s["flows"]]
@@ -626,7 +641,8 @@ def route_flows(ctx, flows, W, H):
         # the endpoints' own cards may be crossed, but an arrow riding along their border looks like part of it
         soft = [ctx["rects"][i] for i in {*ctx["info"][a]["ancestors"], *ctx["info"][b]["ancestors"]}
                 if ctx["info"].get(i, {}).get("kind") in ("zone", "card", "boundary")]
-        pts = L.route(ctx["rects"][a], ctx["rects"][b], obs, used, bounds, soft=soft)
+        cross = [z["rect"] for z in zones if z["id"] not in exempt]
+        pts = L.route(ctx["rects"][a], ctx["rects"][b], obs, used, bounds, soft=soft, cross=cross)
         routed = pts is not None
         if not routed:
             ra, rb = ctx["rects"][a], ctx["rects"][b]
@@ -750,8 +766,8 @@ def set_title(ctx, text, W):
     """Returns (left, bottom, width) of the title, in inches."""
     slide, s = ctx["slide"], ctx["style"]
     t = slide.shapes.title
-    if t is not None:
-        t.text = text
+    if t is not None:  # the template's title placeholder: keep its place, use the style's type
+        write(t.text_frame, [(text, s["sizes"]["title"], s["colors"]["text"], True)], s, MSO_ANCHOR.MIDDLE)
         return t.left / EMU, (t.top + t.height) / EMU, t.width / EMU
     tb = slide.shapes.add_textbox(E(0.3), E(0.22), E(W - 2.8), E(0.62))
     tb.name = "title"

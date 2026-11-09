@@ -20,6 +20,7 @@ Each rule: `{"severity": "error" | "warn" | "off", ...params}`. Errors block del
 | `arrow-through-box` | error | – | an arrow passes through a box that isn't its endpoint or a container of one |
 | `arrow-crossings` | warn | `max` 2 | arrow crossings on the slide |
 | `arrow-bends` | warn | `max` 3 | bends in one arrow |
+| `short-arrow` | warn | `min` 0.25 (in) | an arrow too short to read (just an arrowhead) |
 | `label-collision` | warn | – | an arrow label overlaps a box or another label |
 | `safe-area` | error | – | a box is outside the content area |
 | `density` | warn | `maxNodes` 40, `maxColumns` 6 | slide too dense |
