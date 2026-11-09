@@ -35,7 +35,11 @@ Ask for the org name (used as the folder name). If screenshots disagree with eac
   - `panel{header: "text"|"bar", align: "center"|"left", radius, border, shadow, pad}`;
   - `colors{...}`: `panelFill` / `panelBorder` set to `null` give borderless columns under header bars;
   - `gap[...]`, `node{iconLeft, iconTop, iconLeftMinWidth}`, `content{...}`;
-  - `flows{<type>: {color, label, dash?}}`, `legend{title}`.
+  - `flows{<type>: {color, label, dash?}}` (dash: `dash`, `round_dot`, `long_dash`, ...), `legend{title}`;
+  - `flowOptions{level: node|card|zone, labels: steps|none}`: the org's arrow convention. For example, "arrows join
+    blocks, not services, and carry no numbers" is `{"level": "card", "labels": "none"}`;
+  - no template: `chrome{accentBar, accentColor, footerBand (height in), footerColor, footerText, logo}`;
+  - icons above names everywhere: `node.iconLeftMinWidth: 99`.
 
 ## 3. Rules (the org's guidelines, made checkable)
 Read the guidelines and the screenshots for rules, then write them into `style.json` → `"rules"`, using the catalogue:

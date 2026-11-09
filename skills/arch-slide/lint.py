@@ -4,6 +4,7 @@ Rule TYPES live here; rule VALUES come from the org (style.json "rules", learned
 screenshots or text) and the project (spec.json "rules"). Resolution: defaults <- style <- spec.
 Each rule: {"severity": "error" | "warn" | "off", ...params}.
 """
+import re
 from itertools import combinations
 
 from layout import inside, overlap, seg_hits_rect, segments, segs_cross
@@ -238,11 +239,19 @@ def r_legend(m, c):
         yield "slide", f"{len(m['flow_types'])} flow types but no legend", 'add {"legend": true} to the spec'
 
 
+SMALL_WORDS = {"a", "an", "and", "as", "at", "by", "for", "in", "of", "on", "or", "the", "to", "via", "with"}
+
+
+def _title_case(t):  # every word capitalised, except small words after the first; acronyms (API, SAP) are fine
+    words = [w for w in re.split(r"[\s/&-]+", t) if w and w[0].isalpha()]
+    return all(w[0].isupper() or (i and w in SMALL_WORDS) for i, w in enumerate(words))
+
+
 def r_title_case(m, c):
     for b in m["boxes"]:
         t = b.get("title")
         if b["kind"] == "zone" and t and ((c["case"] == "upper" and t != t.upper()) or
-                                         (c["case"] == "title" and t != t.title())):
+                                         (c["case"] == "title" and not _title_case(t))):
             yield b["id"], f"title {t!r} is not {c['case']} case", f"write it in {c['case']} case"
 
 

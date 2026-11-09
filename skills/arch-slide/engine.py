@@ -244,9 +244,9 @@ def gap_for(ctx, box, depth):
     return box.get("gap", gaps[min(depth, len(gaps) - 1)])
 
 
-def split_row(kids, w, gap):
+def split_row(kids, w, gaps):
     total = sum(k.get("weight", 1) for k in kids)
-    span = w - gap * (len(kids) - 1)
+    span = w - sum(gaps)
     return [span * k.get("weight", 1) / total for k in kids]
 
 
@@ -268,16 +268,16 @@ def min_h(ctx, box, w, depth):
         return extra + 0.2
     gap = gap_for(ctx, box, d2)
     if box.get("dir", "col") == "row":
-        inner = max(min_h(ctx, k, sz, d2) for k, sz in zip(kids, split_row(kids, iw, gap)))
+        inner = max(min_h(ctx, k, sz, d2) for k, sz in zip(kids, split_row(kids, iw, [gap] * (len(kids) - 1))))
     else:
         inner = sum(min_h(ctx, k, iw, d2) for k in kids) + gap * (len(kids) - 1)
     return extra + inner
 
 
-def split_col(ctx, kids, w, h, gap, depth):
-    """Each child gets its measured minimum; leftover height is shared by weight."""
+def split_col(ctx, kids, w, h, gaps, depth):
+    """Each child gets its measured minimum; leftover height is shared by weight. gaps: one per pair of neighbours."""
     mins = [min_h(ctx, k, w, depth) for k in kids]
-    avail = h - gap * (len(kids) - 1)
+    avail = h - sum(gaps)
     extra = avail - sum(mins)
     if extra >= 0:
         total = sum(k.get("weight", 1) for k in kids)
@@ -352,6 +352,22 @@ def _spread(col, anchored):
         avail = y1 - top[last] - sum(mins[last:]) - sum(gp[last:])
         extra = max(0.0, min(statistics.median(extras) if extras else 0.0, avail / (n - 1 - last)))
         lay(last + 1, n, top[last] + mins[last] + gp[last] + extra, extra)
+
+
+def wide_gaps(ctx, flows):
+    """{container id: {i}}: children i and i+1 are joined by an arrow, so the gap between them must fit one."""
+    wide = {}
+
+    def chain(n):  # the box, then each container up to the zone
+        return [n, *reversed(ctx["info"][n]["ancestors"])] if n in ctx["info"] else []
+
+    for f in flows:
+        for a in chain(f.get("from")):
+            for b in chain(f.get("to")):
+                ka, kb = ctx["kidx"].get(a), ctx["kidx"].get(b)
+                if ka and kb and ka[0] == kb[0] and abs(ka[1] - kb[1]) == 1:
+                    wide.setdefault(ka[0], set()).add(min(ka[1], kb[1]))
+    return wide
 
 
 def align_offsets(ctx, flows, sweeps=4):
@@ -452,26 +468,36 @@ def arrange(ctx, box, x, y, w, h, depth, anc, parent, fit=False):
     if row and depth == 0:
         ctx["columns"] = max(ctx["columns"], sum(1 for k in kids if k.get("title") or k.get("kind")))
     pre = [0.0] * len(kids)
+    for i, k in enumerate(kids):  # which box sits where, so arrows between neighbours can widen their gap
+        if k.get("id") or k.get("name"):
+            ctx["kidx"][k.get("id") or k["name"]] = (bid, i)
+    wide = ctx["wide"].get(bid, set())
+    add = max(0.0, FLOW_GAP - gap) if wide else 0.0
+    if add and not row and bid not in ctx["align"]:  # a stacked column widens only into its free space
+        room = h - sum(min_h(ctx, k, w, depth) for k in kids) - gap * (len(kids) - 1)
+        add = min(add, max(0.0, room) / len(wide))
+    gaps = [gap + add if j in wide else gap for j in range(len(kids) - 1)]
     if row:
-        sizes = split_row(kids, w, gap)
+        sizes = split_row(kids, w, gaps)
     elif bid in ctx["align"]:  # second pass: nodes at their min height, moved into line with their partners
         sizes, pre, _ = ctx["align"][bid]
+        gaps = [gap] * (len(kids) - 1)
     else:
-        sizes = split_col(ctx, kids, w, h, gap, depth)
+        sizes = split_col(ctx, kids, w, h, gaps, depth)
         if box.get("align", True) and all(_slot_kind(k) for k in kids):
             mins = [min_h(ctx, k, w, depth) for k in kids]
-            tops = itertools.accumulate([y] + [sz + gap for sz in sizes[:-1]])
+            tops = itertools.accumulate([y] + [sz + g for sz, g in zip(sizes[:-1], gaps)])
             ctx["cols"].append({"id": bid, "y": y, "h": h, "gap": gap, "mins": mins,
                                 "ids": [_node_ids(k) for k in kids],
                                 "top": [t + (sz - m) / 2 for t, sz, m in zip(tops, sizes, mins)]})
     pos = x if row else y
-    for k, size, p in zip(kids, sizes, pre):
+    for i, (k, size, p) in enumerate(zip(kids, sizes, pre)):
         pos += p
         if row:
             arrange(ctx, k, pos, y, size, h, depth, anc, bid)
         else:
             arrange(ctx, k, x, pos, w, size, depth, anc, bid, fit=True)
-        pos += size + gap
+        pos += size + (gaps[i] if i < len(gaps) else 0)
 
 
 def draw_panel(ctx, box, bid, kind, x, y, w, h, depth, anc, parent):
@@ -602,6 +628,7 @@ def steps_of(f):
 
 def resolve_flows(ctx, spec, spec_dir):
     seqd, skipped, flows = None, [], spec.get("flows", [])
+    opts = {**ctx["style"].get("flowOptions", {}), **spec.get("flowOptions", {})}  # org default, then project
     if spec.get("sequence"):
         seqd = S.parse((spec_dir / spec["sequence"]).read_text(encoding="utf-8"))
     if flows == "from-sequence":
@@ -609,8 +636,12 @@ def resolve_flows(ctx, spec, spec_dir):
             ctx["spec_errors"].append('"flows": "from-sequence" needs "sequence": "<file.mmd>"')
             return [], None, []
         owner = {p: bid for bid, parts in ctx["participants"].items() for p in parts}
-        opts = spec.get("flowOptions", {})
         flows, skipped = S.derive_flows(seqd, owner, lambda b: lift(ctx, b, opts.get("level", "node")), opts)
+    else:  # hand-listed flows: missing type = the default type; "labels": "none" applies to them too
+        types = ctx["style"]["flows"]
+        dflt = opts.get("default") if opts.get("default") in types else next(iter(types))
+        flows = [{**f, "type": f.get("type") or dflt, "plain": f.get("plain", opts.get("labels") == "none")}
+                 for f in flows]
     return flows, seqd, skipped
 
 
@@ -689,7 +720,7 @@ def draw_routes(ctx, routes):
             tb = shapes.add_textbox(E(rect[0]), E(rect[1]), E(rect[2]), E(rect[3]))
             tb.name = f"label:{r['id']}"
             write(tb.text_frame, paras, s, MSO_ANCHOR.MIDDLE, PP_ALIGN.CENTER, 0.02)
-        elif r["steps"]:
+        elif r["steps"] and not f.get("plain"):
             rect, hit = L.place_label(r["pts"], 0.24, 0.24, avoid, others)
             b = box_shape(shapes, MSO_SHAPE.OVAL, *rect, fill=flow["color"], name=f"step:{r['id']}")
             write(b.text_frame, [(str(r["steps"][0]), s["sizes"]["minFontPt"], "FFFFFF", True)], s,
@@ -749,10 +780,12 @@ def blank_chrome(ctx, W, H):
     s, c = ctx["style"], ctx["style"]["colors"]
     ch, shapes = s["chrome"], ctx["slide"].shapes
     if ch.get("accentBar"):
-        box_shape(shapes, MSO_SHAPE.RECTANGLE, 0, 0.22, 0.12, 0.62, fill=c["primary"], name="chrome:accent")
+        box_shape(shapes, MSO_SHAPE.RECTANGLE, 0, 0.22, 0.12, 0.62, fill=ch.get("accentColor") or c["primary"],
+                  name="chrome:accent")
     band = ch.get("footerBand") or 0
     if band:
-        fb = box_shape(shapes, MSO_SHAPE.RECTANGLE, 0, H - band, W, band, fill=c["primary"], name="chrome:footer")
+        fb = box_shape(shapes, MSO_SHAPE.RECTANGLE, 0, H - band, W, band, fill=ch.get("footerColor") or c["primary"],
+                       name="chrome:footer")
         if ch.get("footerText"):
             write(fb.text_frame, [(ch["footerText"], s["sizes"]["minFontPt"] + 1, "FFFFFF", True)], s,
                   MSO_ANCHOR.MIDDLE, PP_ALIGN.RIGHT, 0.2)
@@ -798,7 +831,7 @@ def check_spec(spec, style, errors):
             for end in ("from", "to"):
                 if f.get(end) not in ids:
                     errors.append(f"flow {f.get('from')}->{f.get('to')}: unknown {end} id {f.get(end)!r}")
-            if f.get("type") not in style["flows"]:
+            if f.get("type") is not None and f["type"] not in style["flows"]:  # no type = the default
                 errors.append(f"flow {f.get('from')}->{f.get('to')}: type {f.get('type')!r} not in style flows "
                               f"{list(style['flows'])}")
 
@@ -812,7 +845,8 @@ def _walk(box):
 def new_ctx(slide, style, icon_dirs):
     return {"slide": slide, "style": style, "rects": {}, "info": {}, "boxes": [], "texts": [], "icons": [],
             "color_pairs": [], "participants": {}, "used": set(), "icon_dirs": icon_dirs, "columns": 0,
-            "counter": itertools.count(1), "spec_errors": [], "squeezed": False, "cols": [], "align": {}}
+            "counter": itertools.count(1), "spec_errors": [], "squeezed": False, "cols": [], "align": {},
+            "kidx": {}, "wide": {}}
 
 
 def build(spec_paths, style_ref, out):
@@ -854,7 +888,14 @@ def build(spec_paths, style_ref, out):
         # pass 1 (scratch slide): measure the layout and find the flows; then line connected nodes up
         probe = new_ctx(scratch.slides.add_slide(scratch.slide_layouts[6]), s, icon_dirs)
         arrange(probe, spec["root"], *content, 0, [], "_root")
-        ctx["align"] = align_offsets(probe, resolve_flows(probe, spec, spec_path.parent)[0])
+        pflows = resolve_flows(probe, spec, spec_path.parent)[0]
+        ctx["wide"] = wide_gaps(probe, pflows)
+        if ctx["wide"]:  # neighbours joined by arrows got wider gaps: measure again before aligning
+            probe = new_ctx(scratch.slides.add_slide(scratch.slide_layouts[6]), s, icon_dirs)
+            probe["wide"] = ctx["wide"]
+            arrange(probe, spec["root"], *content, 0, [], "_root")
+            pflows = resolve_flows(probe, spec, spec_path.parent)[0]
+        ctx["align"] = align_offsets(probe, pflows)
         arrange(ctx, spec["root"], *content, 0, [], "_root")
         flows, seqd, skipped = resolve_flows(ctx, spec, spec_path.parent)
         routes = route_flows(ctx, flows, W, H)

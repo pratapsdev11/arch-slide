@@ -91,6 +91,15 @@ def test_sequence_flows(tmp):
               if sh.name.startswith("label:")]
     assert any(t.startswith("1 · 5") for t in labels) and any(t.startswith("2 · 3") for t in labels), labels
 
+    # block level, no numbers (an org preference in style.json, or per project in the spec)
+    spec["flowOptions"] = {"level": "zone", "labels": "none"}
+    (tmp / "seq.json").write_text(json.dumps(spec), encoding="utf-8")
+    rep = run("build", str(tmp / "seq.json"), "-o", str(tmp / "plain.pptx"))
+    names = [sh.name for sh in Presentation(str(tmp / "plain.pptx")).slides[0].shapes]
+    assert sorted(n for n in names if n.startswith("flow:")) == ["flow:app->data", "flow:users->app"], names
+    assert not [n for n in names if n.startswith(("label:", "step:"))], names
+    assert not issues(rep, "traceability") and not issues(rep, "unused-messages"), issues(rep)
+
 
 def test_rules_from_org_and_project(tmp):
     org = tmp / "org"

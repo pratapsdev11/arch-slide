@@ -50,8 +50,10 @@ def derive_flows(seq, owner, lift, opts):
 
     owner: participant id -> node id (from each node's "participants" list)
     lift:  node id -> the box id to draw the arrow at (node, card or zone level)
-    opts:  {"default": type, "overrides": [{from, to, type?, label?, note?}]}
+    opts:  {"level": node|card|zone, "labels": steps|none, "default": type, "overrides": [{from, to, type?, label?, note?}]}
+           labels "none": plain arrows; step numbers are kept on the flow for traceability but not drawn.
     Returns (flows, skipped messages)."""
+    block = opts.get("level", "node") != "node"  # messages inside one card/zone are collapsed on purpose
     pairs, skipped = {}, []
     for msg in seq["messages"]:
         a, b = owner.get(msg["from"]), owner.get(msg["to"])
@@ -60,7 +62,8 @@ def derive_flows(seq, owner, lift, opts):
             continue
         a, b = lift(a), lift(b)
         if a == b:
-            skipped.append({"n": msg["n"], "why": "inside one box"})
+            if not block:
+                skipped.append({"n": msg["n"], "why": "inside one box"})
             continue
         key = tuple(sorted((a, b)))
         f = pairs.setdefault(key, {"from": a, "to": b, "steps": [], "texts": [], "dirs": set()})
@@ -72,10 +75,11 @@ def derive_flows(seq, owner, lift, opts):
     for (a, b), f in pairs.items():
         o = over.get((f["from"], f["to"])) or over.get((f["to"], f["from"])) or {}
         steps = " · ".join(str(n) for n in f["steps"])
+        plain = opts.get("labels") == "none"
+        label = o.get("label") if plain else (f"{steps}. {o['label']}" if o.get("label") else steps)
         flows.append({
             "from": f["from"], "to": f["to"], "type": o.get("type", opts.get("default", "data")),
-            "both": len(f["dirs"]) > 1, "steps": f["steps"],
-            "label": f"{steps}. {o['label']}" if o.get("label") else steps,
+            "both": len(f["dirs"]) > 1, "steps": f["steps"], "plain": plain, "label": label,
             "note": o.get("note"),  # message text stays in the sequence diagram; arrows carry step numbers
             "messages": f["texts"],
         })

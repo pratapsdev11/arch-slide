@@ -20,7 +20,9 @@ sequence diagram (`02-flow.mmd`) are approved. Your job is the spec and a clean 
 1. Write `<work>/arch-spec.json`:
    - one zone (column) per stage. Order the columns, and the cards inside them, by first appearance in the
      sequence diagram, so most arrows run left to right;
-   - every node lists its sequence `participants`; `"sequence": "02-flow.mmd"`, `"flows": "from-sequence"`;
+   - every node lists its sequence `participants`; `"sequence": "02-flow.mmd"`, `"flows": "from-sequence"`.
+     The style's `flowOptions` (arrow level, numbers or not) are the org's convention: don't override them unless
+     the user asks, and never list flows by hand to imitate them;
    - icon ids from real files: `Glob ~/.arch-slide/icons/<pack>/*keyword*`. No product icon: a generic one plus
      `"iconStandIn": true`;
    - follow the style's `_notes` (subtitles, cards, label style);

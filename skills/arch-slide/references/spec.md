@@ -70,10 +70,17 @@ Either derive them from the sequence diagram (preferred):
 - Messages between the same two boxes merge into one arrow labelled with all their step numbers (`6 · 10 · 16`).
   Two-way traffic gets heads at both ends.
 - Self-messages and unmapped participants are reported by the `unused-messages` rule.
-- `flowOptions.level`: `node` (default), `card` or `zone`. This lifts arrows up to containers for a calmer overview slide.
+- `flowOptions.level`: `node` (default), `card` or `zone`. This lifts arrows up to the containers: one arrow per
+  pair of blocks, and messages inside one block are collapsed (not reported).
+- `flowOptions.labels`: `steps` (default: arrows carry their step numbers) or `none` (plain arrows; the step
+  numbers are still checked by `traceability`, just not drawn). Override labels still show as short text.
+- The org's style can set `flowOptions` too (e.g. `{"level": "card", "labels": "none"}` for "few, plain,
+  block-to-block arrows"). The spec's `flowOptions` override it for one project. Don't list flows by hand to get
+  this look.
 - `flowOptions.default`: the flow type to use (a key in the style's `flows`). `overrides`: per pair `type`, `label`, `note`.
 
-Or list them explicitly: `[{"from", "to", "type", "both"?, "step"? | "steps"?, "label"?, "note"?}]`. Step numbers
+Or list them explicitly: `[{"from", "to", "type"?, "both"?, "step"? | "steps"?, "label"?, "note"?}]` (no `type` =
+`flowOptions.default`). Step numbers
 are checked against the sequence diagram when one is referenced (`traceability` rule).
 
 Arrows are routed orthogonally around boxes and boundaries they don't belong to, and never along a card's border.
