@@ -18,6 +18,7 @@ import layout as L  # noqa: E402
 
 
 def run(*args):
+    args = [*args, "--json"] if args[0] == "build" else list(args)
     r = subprocess.run([sys.executable, str(HERE / "build.py"), *args], capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 0, r.stderr
     return json.loads(r.stdout)
@@ -106,6 +107,25 @@ def test_rules_from_org_and_project(tmp):
     assert ("min-font", "error") in sev and ("title-case", "error") in sev and ("density", "warn") in sev, sev
 
 
+def test_align(tmp):
+    # one node on the right linked to the 3rd of 4 nodes on the left: it must slide level with it, arrow straight
+    spec = {"title": "Align", "root": {"dir": "row", "children": [
+        {"id": "L", "title": "Left", "children": [{"id": "ca", "title": "Card A", "children": [
+            {"id": f"a{i}", "name": f"Node {i}"} for i in range(1, 5)]}]},
+        {"id": "R", "title": "Right", "children": [{"id": "cb", "title": "Card B", "children": [
+            {"id": "b", "name": "Bee"}]}]}]},
+        "flows": [{"from": "b", "to": "a3", "type": "data"}]}
+    (tmp / "align.json").write_text(json.dumps(spec), encoding="utf-8")
+    rep = run("build", str(tmp / "align.json"), "-o", str(tmp / "align.pptx"))
+    assert rep["ok"], issues(rep)
+    sh = {s.name: s for s in Presentation(str(tmp / "align.pptx")).slides[0].shapes}
+    mid = lambda s: s.top + s.height / 2  # noqa: E731
+    assert abs(mid(sh["node:b"]) - mid(sh["node:a3"])) < Inches(0.05), (mid(sh["node:b"]), mid(sh["node:a3"]))
+    assert type(sh["flow:b->a3"]).__name__ == "Connector"  # 2 points: a straight arrow
+    card = sh["card:cb"]
+    assert card.top <= sh["node:b"].top and sh["node:b"].top + sh["node:b"].height <= card.top + card.height
+
+
 def test_template(tmp):
     # 3 slides: same footer band at the bottom edge, a different title and a content box on each
     prs = Presentation()
@@ -146,7 +166,7 @@ def test_icons(tmp):
 
 if __name__ == "__main__":
     test_router()
-    for t in (test_build, test_sequence_flows, test_rules_from_org_and_project, test_template, test_icons):
+    for t in (test_build, test_sequence_flows, test_rules_from_org_and_project, test_align, test_template, test_icons):
         with tempfile.TemporaryDirectory() as d:
             t(Path(d))
     print("ok")

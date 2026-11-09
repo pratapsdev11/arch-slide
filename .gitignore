@@ -1,3 +1,5 @@
 __pycache__/
 *.pyc
 arch-work/
+.claude/
+skills/arch-slide/examples/lint.json

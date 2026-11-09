@@ -33,7 +33,26 @@ import seq as S  # noqa: E402
 
 
 def cmd_build(a):
-    build(a.specs, a.style, a.out, a.strict)
+    rep = build(a.specs, a.style, a.out)
+    if a.preview:
+        rep["png"] = render(a.out, a.preview)
+    if a.json:
+        print(json.dumps(rep, indent=1, ensure_ascii=False, default=list))
+    else:  # short by default: the full report is in lint.json
+        print(f"out: {rep['out']}  (metrics {rep['metrics']})")
+        for i, sl in enumerate(rep["slides"], 1):
+            lt = sl["lint"]
+            print(f"slide {i}: score {lt['score']} | {lt['errors']} errors | {lt['warnings']} warnings | "
+                  f"{sl['flows']} arrows")
+            for x in lt["issues"][:20]:
+                print(f"  {x['severity']:5} {x['rule']} {x['id']}: {x['message']} -> {x['fix']}")
+            if len(lt["issues"]) > 20:
+                print(f"  ... {len(lt['issues']) - 20} more in lint.json")
+        print("lint:", ", ".join(rep["lint_files"]))
+        if rep.get("png"):
+            print("preview:", ", ".join(rep["png"]))
+    if a.strict and not rep["ok"]:
+        sys.exit(1)
 
 
 def cmd_seq(a):
@@ -284,11 +303,16 @@ def cmd_fetch(a):
 
 
 def cmd_preview(a):
-    deck = Path(a.deck).resolve()
+    print(json.dumps({"png": render(a.deck, a.out_dir)}, indent=1))
+
+
+def render(deck, out_dir=None):
+    """PNG per slide. Returns the paths."""
+    deck = Path(deck).resolve()
     prs = Presentation(str(deck))
     W = 1600
     Hpx = int(W * prs.slide_height / prs.slide_width)
-    out_dir = Path(a.out_dir).resolve() if a.out_dir else deck.parent  # keep PNGs out of the deliverables folder
+    out_dir = Path(out_dir).resolve() if out_dir else deck.parent  # keep PNGs out of the deliverables folder
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = out_dir / deck.stem
     outs = []
@@ -298,9 +322,13 @@ def cmd_preview(a):
               f"$p=$app.Presentations.Open('{q(deck)}', $true, $false, $false); $i=1; "
               f"foreach($s in $p.Slides){{ $s.Export('{q(stem)}-' + $i + '.png','PNG',{W},{Hpx}); $i++ }}; "
               f"$p.Close(); if ($app.Presentations.Count -eq 0) {{ $app.Quit() }}")
-        r = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True)
-        if r.returncode == 0:
-            outs = [f"{stem}-{i}.png" for i in range(1, len(prs.slides) + 1)]
+        try:  # PowerPoint can hang on a dialog: give up and fall back to LibreOffice
+            r = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True,
+                               timeout=90)
+            if r.returncode == 0:
+                outs = [f"{stem}-{i}.png" for i in range(1, len(prs.slides) + 1)]
+        except subprocess.TimeoutExpired:
+            pass
     if not outs:
         soffice = shutil.which("soffice") or shutil.which("libreoffice") or next(
             (p for p in (r"C:\Program Files\LibreOffice\program\soffice.exe",
@@ -314,7 +342,7 @@ def cmd_preview(a):
             for i, page in enumerate(pymupdf.open(Path(tmp) / f"{deck.stem}.pdf"), 1):
                 page.get_pixmap(dpi=int(W / (prs.slide_width / EMU))).save(f"{stem}-{i}.png")
                 outs.append(f"{stem}-{i}.png")
-    print(json.dumps({"png": outs}, indent=1))
+    return outs
 
 
 def iter_shapes(shapes):
@@ -357,6 +385,8 @@ def main():
     p = sub.add_parser("seq"); p.add_argument("mmd")  # noqa: E702
     p = sub.add_parser("build"); p.add_argument("specs", nargs="+")  # noqa: E702
     p.add_argument("--strict", action="store_true", help="exit 1 when lint has errors")
+    p.add_argument("--json", action="store_true", help="print the full report (default: a short summary)")
+    p.add_argument("--preview", metavar="DIR", help="also render PNG previews into DIR")
     p.add_argument("--style", help="style dir/file or saved org name; omit for neutral"); p.add_argument("-o", "--out", required=True)  # noqa: E702
     p = sub.add_parser("preview"); p.add_argument("deck"); p.add_argument("--out-dir")  # noqa: E702
     a = ap.parse_args()

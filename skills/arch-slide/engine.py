@@ -3,7 +3,8 @@
 Layers:
   1. style   : org tokens + org rules (style.json), merged over neutral defaults
   2. model   : spec tree (+ Mermaid sequence -> flows, see seq.py)
-  3. layout  : boxes sized from measured content (layout.py), extra space shared by weight
+  3. layout  : boxes sized from measured content (layout.py), extra space shared by weight; then a second pass
+               slides nodes inside their card so connected nodes line up and arrows run straight (align_offsets)
   4. routing : orthogonal arrows around boxes (layout.route), labels placed clear of boxes
   5. render  : native, grouped, named PowerPoint shapes
   6. lint    : rule engine (lint.py) -> lint.json next to the spec
@@ -11,6 +12,7 @@ Layers:
 import itertools
 import json
 import re
+import statistics
 import sys
 from pathlib import Path
 
@@ -284,6 +286,118 @@ def split_col(ctx, kids, w, h, gap, depth):
     return [m * avail / sum(mins) for m in mins]
 
 
+# ---------- alignment: line connected nodes up so arrows run straight ----------
+
+def _spacer(k):
+    return not (k.get("children") or "name" in k or k.get("title") or k.get("kind") or k.get("panel")
+                or k.get("legend"))
+
+
+def _slot_kind(k):
+    """What a column child is, for alignment: a node, a plain row of nodes, a spacer, or None (anything else)."""
+    if "name" in k:
+        return "node"
+    if _spacer(k):
+        return "spacer"
+    if k.get("dir") == "row" and not (k.get("title") or k.get("kind") or k.get("panel")) \
+            and all("name" in c or _spacer(c) for c in k["children"]):
+        return "row"
+    return None
+
+
+def _node_ids(k):
+    return [c.get("id") or c["name"] for c in ([k] if "name" in k else k.get("children", [])) if "name" in c]
+
+
+def _isotonic(t, w):
+    """Weighted least-squares fit to t that never decreases (pool adjacent violators)."""
+    blocks = []
+    for v, wt in zip(t, w):
+        blocks.append([v, wt, 1])
+        while len(blocks) > 1 and blocks[-2][0] > blocks[-1][0]:
+            v2, w2, n2 = blocks.pop()
+            v1, w1, n1 = blocks.pop()
+            blocks.append([(v1 * w1 + v2 * w2) / (w1 + w2), w1 + w2, n1 + n2])
+    return [v for v, _, n in blocks for _ in range(n)]
+
+
+def _spread(col, anchored):
+    """Children with no partner beside them: evenly spaced between the anchored ones, packed from the top,
+    and the ones after the last anchor keep the column's rhythm."""
+    y1, g, mins, top, n = col["y"] + col["h"], col["gap"], col["mins"], col["top"], len(col["mins"])
+    idx = sorted(anchored)
+
+    def lay(first, stop, start, step):
+        pos = start
+        for i in range(first, stop):
+            top[i] = pos
+            pos += mins[i] + step
+
+    a = idx[0]
+    if a:
+        lay(0, a, col["y"], (top[a] - col["y"] - sum(mins[:a])) / a)
+    for a, b in zip(idx, idx[1:]):
+        if b - a > 1:
+            step = (top[b] - top[a] - sum(mins[a:b])) / (b - a)
+            lay(a + 1, b, top[a] + mins[a] + step, step)
+    last = idx[-1]
+    if last < n - 1:
+        gaps = [top[i + 1] - top[i] - mins[i] for i in range(last)]
+        step = min(max(g, statistics.median(gaps)) if gaps else g,
+                   (y1 - top[last] - sum(mins[last:])) / (n - 1 - last))
+        lay(last + 1, n, top[last] + mins[last] + step, step)
+
+
+def align_offsets(ctx, flows, sweeps=4):
+    """For every column of nodes (a card's node list), place each node as close as possible to the height of
+    the boxes it connects to beside it, keeping order, min heights and gaps. Frames never move: only the free
+    space inside each column is redistributed.
+    Returns {container id: (child heights, gap before each child, unused height at the bottom)}."""
+    rects, cols = ctx["rects"], ctx["cols"]
+    centre = {k: r[1] + r[3] / 2 for k, r in rects.items()}
+    home = {n: (ci, ki) for ci, col in enumerate(cols) for ki, ids in enumerate(col["ids"]) for n in ids}
+
+    def beside(a, b):  # side by side, so a horizontal arrow can join them
+        (ax, _, aw, _), (bx, _, bw, _) = rects[a], rects[b]
+        return ax + aw <= bx or bx + bw <= ax
+
+    edges = [(f["from"], f["to"]) for f in flows if f.get("from") in rects and f.get("to") in rects]
+    done = set()
+    for _ in range(sweeps):  # Gauss-Seidel: each column sees the columns already moved in this sweep
+        for ci, col in enumerate(cols):
+            mins, gap, n = col["mins"], col["gap"], len(col["mins"])
+            spare = col["h"] - sum(mins) - gap * (n - 1)
+            want = [[] for _ in range(n)]
+            for a, b in edges:
+                for u, v in ((a, b), (b, a)):
+                    if home.get(u, (-1,))[0] == ci and home.get(v, (-1,))[0] != ci and beside(u, v):
+                        want[home[u][1]].append(centre[v])
+            if spare <= 0 or not any(want):
+                continue
+            t, w, acc = [], [], 0.0
+            for i in range(n):  # children with no partner beside them hold their place, weakly
+                top = statistics.median(want[i]) - mins[i] / 2 if want[i] else col["top"][i]
+                t.append(top - acc)
+                w.append(len(want[i]) or 0.01)
+                acc += mins[i] + gap
+            acc = 0.0
+            for i, z in enumerate(_isotonic(t, w)):
+                col["top"][i] = min(max(z, col["y"]), col["y"] + spare) + acc
+                acc += mins[i] + gap
+            _spread(col, {i for i in range(n) if want[i]})
+            for i in range(n):
+                for nid in col["ids"][i]:
+                    centre[nid] = col["top"][i] + mins[i] / 2
+            done.add(ci)
+    out = {}
+    for ci in done:
+        col = cols[ci]
+        ends = [col["y"]] + [t + m + col["gap"] for t, m in zip(col["top"], col["mins"])]
+        out[col["id"]] = (col["mins"], [max(0.0, t - e) for t, e in zip(col["top"], ends)],
+                          max(0.0, col["y"] + col["h"] - ends[-1] + col["gap"]))
+    return out
+
+
 # ---------- layout + draw ----------
 
 def record(ctx, bid, kind, rect, depth, anc, parent, **extra):
@@ -294,7 +408,7 @@ def record(ctx, bid, kind, rect, depth, anc, parent, **extra):
         ctx["rects"][bid] = rect
 
 
-def arrange(ctx, box, x, y, w, h, depth, anc, parent):
+def arrange(ctx, box, x, y, w, h, depth, anc, parent, fit=False):
     if box.get("legend"):
         ctx["legend_rect"] = (x, y, w, h)
         record(ctx, "legend", "legend", (x, y, w, h), depth, anc, parent)
@@ -305,6 +419,8 @@ def arrange(ctx, box, x, y, w, h, depth, anc, parent):
     if box.get("participants"):
         ctx["participants"][bid] = box["participants"]
     kind = box_kind(box, depth)
+    if fit and kind in ("card", "boundary") and bid in ctx["align"]:
+        h -= ctx["align"][bid][2]  # no empty card bottom: the space stays free below it
     if kind == "boundary":
         x, y, w, h = draw_boundary(ctx, box, bid, x, y, w, h, depth, anc, parent)
         anc = anc + [bid]
@@ -321,13 +437,26 @@ def arrange(ctx, box, x, y, w, h, depth, anc, parent):
     row = box.get("dir", "col") == "row"
     if row and depth == 0:
         ctx["columns"] = max(ctx["columns"], sum(1 for k in kids if k.get("title") or k.get("kind")))
-    sizes = split_row(kids, w, gap) if row else split_col(ctx, kids, w, h, gap, depth)
+    pre = [0.0] * len(kids)
+    if row:
+        sizes = split_row(kids, w, gap)
+    elif bid in ctx["align"]:  # second pass: nodes at their min height, moved into line with their partners
+        sizes, pre, _ = ctx["align"][bid]
+    else:
+        sizes = split_col(ctx, kids, w, h, gap, depth)
+        if box.get("align", True) and all(_slot_kind(k) for k in kids):
+            mins = [min_h(ctx, k, w, depth) for k in kids]
+            tops = itertools.accumulate([y] + [sz + gap for sz in sizes[:-1]])
+            ctx["cols"].append({"id": bid, "y": y, "h": h, "gap": gap, "mins": mins,
+                                "ids": [_node_ids(k) for k in kids],
+                                "top": [t + (sz - m) / 2 for t, sz, m in zip(tops, sizes, mins)]})
     pos = x if row else y
-    for k, size in zip(kids, sizes):
+    for k, size, p in zip(kids, sizes, pre):
+        pos += p
         if row:
             arrange(ctx, k, pos, y, size, h, depth, anc, bid)
         else:
-            arrange(ctx, k, x, pos, w, size, depth, anc, bid)
+            arrange(ctx, k, x, pos, w, size, depth, anc, bid, fit=True)
         pos += size + gap
 
 
@@ -340,7 +469,8 @@ def draw_panel(ctx, box, bid, kind, x, y, w, h, depth, anc, parent):
                    width=p["border"], radius=p["radius"], name=f"{kind}:{bid}")
     if p["shadow"] and top:
         add_shadow(sh)
-    record(ctx, bid, kind, (x, y, w, h), depth, anc, parent, title=box.get("title"))
+    record(ctx, bid, kind, (x, y, w, h), depth, anc, parent, title=box.get("title"),
+           ghost=top and not (fill or line))
     if bar:
         hb = box_shape(shapes, MSO_SHAPE.ROUND_2_SAME_RECTANGLE, x, y, w, hh, fill=c["primary"],
                        radius=p["radius"], name=f"header:{bid}")
@@ -363,9 +493,11 @@ def draw_boundary(ctx, box, bid, x, y, w, h, depth, anc, parent):
     lh, size = boundary_dims(ctx, box)
     sh = box_shape(ctx["slide"].shapes, MSO_SHAPE.ROUNDED_RECTANGLE, x, y, w, h, line=c["boundary"], width=1,
                    dash=MSO_LINE_DASH_STYLE.DASH, radius=ctx["style"]["panel"]["radius"], name=f"boundary:{bid}")
+    record(ctx, bid, "boundary", (x, y, w, h), depth, anc, parent, title=box.get("title"))
     if box.get("title"):
         write(sh.text_frame, [(box["title"], size, c["boundary"], True)], s, MSO_ANCHOR.TOP, PP_ALIGN.LEFT, 0.06)
-    record(ctx, bid, "boundary", (x, y, w, h), depth, anc, parent, title=box.get("title"))
+        tw = L.text_width(box["title"], s["font"], size, True) + 0.16
+        record(ctx, f"title:{bid}", "header", (x, y, min(w, tw), lh), depth, anc + [bid], bid, owner=bid)
     return x + pad, y + lh, w - 2 * pad, h - lh - pad
 
 
@@ -473,7 +605,8 @@ def route_flows(ctx, flows, W, H):
     s, m = ctx["style"], ctx["style"]["content"]
     bounds = (max(0, m["left"] - 0.25), max(0, ctx["top"] - 0.1),
               min(W, W - m["right"] + 0.25) - max(0, m["left"] - 0.25), H - m["bottom"] + 0.1 - max(0, ctx["top"] - 0.1))
-    blockers = [b for b in ctx["boxes"] if b["kind"] in ("node", "card", "zone", "legend", "header")]
+    blockers = [b for b in ctx["boxes"] if b["kind"] in ("node", "card", "zone", "legend", "header", "boundary")
+                and not b.get("ghost")]  # an invisible zone body can be crossed; its header bar can't
     used, routes = {}, []
     valid = [f for f in flows if f.get("from") in ctx["rects"] and f.get("to") in ctx["rects"]
              and f.get("type") in s["flows"]]
@@ -490,7 +623,10 @@ def route_flows(ctx, flows, W, H):
         # header bars are never crossed, not even the endpoint's own: arrows over header text are unreadable
         obs = [(r[0] - 0.02, r[1] - 0.02, r[2] + 0.04, r[3] + 0.04) for r in
                (o["rect"] for o in blockers if o["kind"] == "header" or o["id"] not in exempt)]
-        pts = L.route(ctx["rects"][a], ctx["rects"][b], obs, used, bounds)
+        # the endpoints' own cards may be crossed, but an arrow riding along their border looks like part of it
+        soft = [ctx["rects"][i] for i in {*ctx["info"][a]["ancestors"], *ctx["info"][b]["ancestors"]}
+                if ctx["info"].get(i, {}).get("kind") in ("zone", "card", "boundary")]
+        pts = L.route(ctx["rects"][a], ctx["rects"][b], obs, used, bounds, soft=soft)
         routed = pts is not None
         if not routed:
             ra, rb = ctx["rects"][a], ctx["rects"][b]
@@ -505,7 +641,14 @@ def draw_routes(ctx, routes):
     shapes = ctx["slide"].shapes
     # labels may sit in card padding, never on node text, header bars, the legend or other labels
     avoid = [b["rect"] for b in ctx["boxes"] if b["kind"] in ("node", "legend", "header")]
+    t = 0.03  # nor on a dashed boundary line
+    for x, y, w, h in (b["rect"] for b in ctx["boxes"] if b["kind"] == "boundary"):
+        avoid += [(x, y - t, w, 2 * t), (x, y + h - t, w, 2 * t), (x - t, y, 2 * t, h), (x + w - t, y, 2 * t, h)]
+    # nor across another arrow's line
+    lines = {r["id"]: [(min(p[0], q[0]) - 0.015, min(p[1], q[1]) - 0.015, abs(p[0] - q[0]) + 0.03,
+                        abs(p[1] - q[1]) + 0.03) for p, q in L.segments(r["pts"])] for r in routes}
     for r in routes:
+        others = [seg for k, v in lines.items() if k != r["id"] for seg in v]
         f = r["flow"]
         flow = s["flows"][f["type"]]
         ctx["used"].add(f["type"])
@@ -526,12 +669,12 @@ def draw_routes(ctx, routes):
             if runs and len(runs) == len(L.segments(r["pts"])) and max(runs) < w:
                 w = max(max(runs) - 0.04, 0.5)
             h = L.measure(paras, s["font"], w - 0.04)[0] + 0.06
-            rect, hit = L.place_label(r["pts"], w, h, avoid)
+            rect, hit = L.place_label(r["pts"], w, h, avoid, others)
             tb = shapes.add_textbox(E(rect[0]), E(rect[1]), E(rect[2]), E(rect[3]))
             tb.name = f"label:{r['id']}"
             write(tb.text_frame, paras, s, MSO_ANCHOR.MIDDLE, PP_ALIGN.CENTER, 0.02)
         elif r["steps"]:
-            rect, hit = L.place_label(r["pts"], 0.24, 0.24, avoid)
+            rect, hit = L.place_label(r["pts"], 0.24, 0.24, avoid, others)
             b = box_shape(shapes, MSO_SHAPE.OVAL, *rect, fill=flow["color"], name=f"step:{r['id']}")
             write(b.text_frame, [(str(r["steps"][0]), s["sizes"]["minFontPt"], "FFFFFF", True)], s,
                   MSO_ANCHOR.MIDDLE, PP_ALIGN.CENTER, 0)
@@ -650,7 +793,14 @@ def _walk(box):
         yield from _walk(k)
 
 
-def build(spec_paths, style_ref, out, strict=False):
+def new_ctx(slide, style, icon_dirs):
+    return {"slide": slide, "style": style, "rects": {}, "info": {}, "boxes": [], "texts": [], "icons": [],
+            "color_pairs": [], "participants": {}, "used": set(), "icon_dirs": icon_dirs, "columns": 0,
+            "counter": itertools.count(1), "spec_errors": [], "squeezed": False, "cols": [], "align": {}}
+
+
+def build(spec_paths, style_ref, out):
+    """Builds the deck and writes lint.json next to each spec. Returns the report."""
     s = load_style(style_ref)
     tpl = s.get("template")
     if tpl:
@@ -666,6 +816,7 @@ def build(spec_paths, style_ref, out, strict=False):
     report = {"out": str(Path(out).resolve()), "metrics": "exact" if L.exact_metrics(s["font"]) else
               f"estimated ({s['font']} not installed)", "slides": []}
     lint_files = {}
+    scratch = Presentation()  # pass 1 draws here, only to measure
     for spec_path in spec_paths:
         spec_path = Path(spec_path)
         spec = json.loads(spec_path.read_text(encoding="utf-8"))
@@ -673,9 +824,7 @@ def build(spec_paths, style_ref, out, strict=False):
         for ph in list(slide.placeholders):  # templates not prepped by `template` may carry content placeholders
             if ph.placeholder_format.type not in (PP_PLACEHOLDER.TITLE, PP_PLACEHOLDER.CENTER_TITLE):
                 ph._element.getparent().remove(ph._element)
-        ctx = {"slide": slide, "style": s, "rects": {}, "info": {}, "boxes": [], "texts": [], "icons": [],
-               "color_pairs": [], "participants": {}, "used": set(), "icon_dirs": icon_dirs, "columns": 0,
-               "counter": itertools.count(1), "spec_errors": [], "squeezed": False}
+        ctx = new_ctx(slide, s, icon_dirs)
         check_spec(spec, s, ctx["spec_errors"])
         if not tpl:
             blank_chrome(ctx, W, H)
@@ -686,6 +835,10 @@ def build(spec_paths, style_ref, out, strict=False):
             top = max(top, draw_subtitle(ctx, spec["subtitle"], tl, tb - 0.06, tw) + 0.08)
         ctx["top"] = top
         content = (m["left"], top, W - m["left"] - m["right"], H - top - m["bottom"])
+        # pass 1 (scratch slide): measure the layout and find the flows; then line connected nodes up
+        probe = new_ctx(scratch.slides.add_slide(scratch.slide_layouts[6]), s, icon_dirs)
+        arrange(probe, spec["root"], *content, 0, [], "_root")
+        ctx["align"] = align_offsets(probe, resolve_flows(probe, spec, spec_path.parent)[0])
         arrange(ctx, spec["root"], *content, 0, [], "_root")
         flows, seqd, skipped = resolve_flows(ctx, spec, spec_path.parent)
         routes = route_flows(ctx, flows, W, H)
@@ -716,6 +869,5 @@ def build(spec_paths, style_ref, out, strict=False):
             {"out": report["out"], "errors": sum(x["lint"]["errors"] for x in slides),
              "slides": slides}, indent=1, ensure_ascii=False), encoding="utf-8")
     report["ok"] = all(x["lint"]["ok"] for x in report["slides"])
-    print(json.dumps(report, indent=1, ensure_ascii=False, default=list))
-    if strict and not report["ok"]:
-        sys.exit(1)
+    report["lint_files"] = [str((f / "lint.json").resolve()) for f in lint_files]
+    return report

@@ -155,7 +155,7 @@ def r_arrow_through(m, c):
     for r in m["routes"]:
         for p, q in segments(r["pts"]):
             for b in m["boxes"]:
-                if b["kind"] in ("node", "card", "zone", "legend", "header") and \
+                if b["kind"] in ("node", "card", "zone", "legend", "header", "boundary") and not b.get("ghost") and \
                         (b["kind"] == "header" or b["id"] not in r["exempt"]) and seg_hits_rect(p, q, b["rect"]):
                     yield r["id"], f"arrow passes through {b['id']}", "re-arrange so the path is clear"
                     break

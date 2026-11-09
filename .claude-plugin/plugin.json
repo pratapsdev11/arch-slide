@@ -1,6 +1,6 @@
 {
   "name": "arch-slide",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Turn a SOW or idea deck into an editable architecture slide in your organisation's style: sequence-diagram driven, real-font layout, routed arrows, org-defined lint rules, independent review and a quality-gate hook.",
   "author": {
     "name": "pratapsdev11",

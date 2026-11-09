@@ -4,6 +4,12 @@ A tree of boxes. Each box splits its area among `children` along `dir`. Every ch
 content needs (text is measured with the real font). Leftover space is shared by `weight`. Widths in a row are
 shared by `weight`.
 
+**Alignment is automatic.** In a column of nodes (a card's node list, or plain rows of nodes), each node slides to
+the height of the boxes it connects to beside it, so those arrows run straight. Nodes with no partner beside them
+are spaced evenly, and the card ends where its content ends. Never add spacer boxes or tune `weight`s to straighten
+arrows. To fix a bent arrow, put the two boxes in neighbouring columns, or reorder siblings. `"align": false` on a
+box keeps the plain weight layout for its children.
+
 ```json
 {
   "title": "Use Case — Architecture",
@@ -41,6 +47,7 @@ shared by `weight`.
 | `dir` | `row` or `col` (default `col`) |
 | `weight` | share of the leftover space (default 1) |
 | `gap` | override the sibling gap |
+| `align` | `false` = don't auto-align this box's children (default on) |
 | `participants` | sequence participants this box represents (zones and cards can represent a whole system) |
 
 ## Nodes (leaf boxes: they have `name`)
@@ -69,8 +76,9 @@ Either derive them from the sequence diagram (preferred):
 Or list them explicitly: `[{"from", "to", "type", "both"?, "step"? | "steps"?, "label"?, "note"?}]`. Step numbers
 are checked against the sequence diagram when one is referenced (`traceability` rule).
 
-Arrows are routed orthogonally around boxes. They are straight when the ports line up; otherwise they bend
-around obstacles. Labels go beside the longest segment, clear of boxes.
+Arrows are routed orthogonally around boxes and boundaries they don't belong to, and never along a card's border.
+They are straight when the ports line up; otherwise they bend around obstacles. A zone with no fill and no border
+(header bar only) can be crossed between its cards. Labels go beside a segment, clear of boxes and other arrows.
 
 ## Legend
 `{"legend": true}` is a box like any other. It lists only the flow types actually used. Whether a legend is

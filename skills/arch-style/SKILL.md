@@ -48,8 +48,8 @@ Read the guidelines and the screenshots for rules, then write them into `style.j
 Put spec conventions the engine can't check in `"_notes"` (e.g. "always wrap nodes in a titled card").
 
 ## 4. Confirm
-- Render the sample: `B build "<arch-slide dir>/examples/sample.json" --style <org> -o ./arch-work/style-sample.pptx`.
-- Preview it: `B preview ./arch-work/style-sample.pptx`.
+- Render and preview the sample in one command: `B build "<arch-slide dir>/examples/sample.json" --style <org>
+  -o ./arch-work/style-sample.pptx --preview ./arch-work/style-preview`.
 - Compare it side by side with the reference. Adjust tokens until it matches.
 - Show the user the image and a summary:
   - the tokens;

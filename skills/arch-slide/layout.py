@@ -165,9 +165,10 @@ def _ports(r, other):
     return [((px, y), 0), ((x + w, py), 1), ((px, y + h), 2), ((x, py), 3)]
 
 
-def route(src, dst, obstacles, used, bounds, cell=0.04, turn=10, crowd=6, hug=2):
+def route(src, dst, obstacles, used, bounds, cell=0.04, turn=10, crowd=6, hug=2, soft=()):
     """Orthogonal path from an edge of `src` to an edge of `dst` avoiding `obstacles` (rects).
     `used` counts grid cells taken by earlier routes; sharing them costs extra, so routes spread out.
+    `soft` rects may be crossed, but running along their border costs extra.
     Returns a list of points, or None when no path exists."""
     bx, by, bw, bh = bounds
     nx, ny = int(bw / cell), int(bh / cell)
@@ -184,6 +185,22 @@ def route(src, dst, obstacles, used, bounds, cell=0.04, turn=10, crowd=6, hug=2)
     def cy(j):
         return by + (j + 0.5) * cell
 
+    # ports already in line and nothing between them: a straight arrow, no search needed
+    for (p, d), (q, e) in ((a, b) for a in _ports(src, dst) for b in _ports(dst, src)):
+        k = 0 if d in (0, 2) else 1  # the coordinate both ports must share
+        ahead = (q[0] - p[0]) * DIRS[d][0] + (q[1] - p[1]) * DIRS[d][1]
+        if e != (d + 2) % 4 or abs(p[k] - q[k]) > 1e-6 or ahead <= 0 or                 any(seg_hits_rect(p, q, o) for o in obstacles):
+            continue
+        if k:  # horizontal
+            cells = [(i, cj(p[1])) for i in range(ci(min(p[0], q[0])), ci(max(p[0], q[0])) + 1)]
+        else:
+            cells = [(ci(p[0]), j) for j in range(cj(min(p[1], q[1])), cj(max(p[1], q[1])) + 1)]
+        if any(c in used for c in cells):
+            continue  # an earlier arrow runs here: let the search find a lane of its own
+        for c in cells:
+            used[c] = 1
+        return [p, q]
+
     blocked = set()
     for (x, y, w, h) in obstacles:  # a cell is blocked when its centre lies inside the obstacle
         i0, i1 = max(0, math.ceil((x - bx) / cell - 0.5)), min(nx - 1, math.floor((x + w - bx) / cell - 0.5))
@@ -193,6 +210,11 @@ def route(src, dst, obstacles, used, bounds, cell=0.04, turn=10, crowd=6, hug=2)
                 blocked.add((i, j))
     # cells hugging an obstacle cost extra, so arrows prefer open gutters to slivers between boxes
     near = {(i + dx, j + dy) for (i, j) in blocked for dx, dy in DIRS} - blocked
+    for (x, y, w, h) in soft:  # a 3-cell band along each border
+        i0, i1, j0, j1 = ci(x), ci(x + w), cj(y), cj(y + h)
+        for k in (-1, 0, 1):
+            near |= {(i, j + k) for i in range(i0, i1 + 1) for j in (j0, j1)}
+            near |= {(i + k, j) for j in range(j0, j1 + 1) for i in (i0, i1)}
 
     def port_cell(pt, d):
         # a full cell clear of the edge, so an obstacle's safety margin never swallows the port
@@ -262,17 +284,26 @@ def simplify(pts):
     return out
 
 
-def place_label(pts, w, h, avoid):
-    """Put a w x h label beside the longest free segment. Returns (rect, collided)."""
-    first = None
+def _area(a, b):
+    return max(0.0, min(a[0] + a[2], b[0] + b[2]) - max(a[0], b[0])) *         max(0.0, min(a[1] + a[3], b[1] + b[3]) - max(a[1], b[1]))
+
+
+def place_label(pts, w, h, avoid, lines=()):
+    """Put a w x h label beside a segment, longest first, at its middle, then nearer either end, clear of the
+    `avoid` rects and of other arrows' `lines`. Returns (rect, collided); when every spot collides, the one with
+    the least overlap, where a line through the label counts as much as covering a third of a small box."""
+    best = None
     for p, q in sorted(segments(pts), key=lambda s: -(abs(s[0][0] - s[1][0]) + abs(s[0][1] - s[1][1]))):
-        mx, my = (p[0] + q[0]) / 2, (p[1] + q[1]) / 2
-        if abs(p[1] - q[1]) < 1e-9:  # horizontal: above, then below
-            cands = [(mx - w / 2, my - h - 0.03, w, h), (mx - w / 2, my + 0.03, w, h)]
-        else:                        # vertical: right, then left
-            cands = [(mx + 0.05, my - h / 2, w, h), (mx - w - 0.05, my - h / 2, w, h)]
-        for r in cands:
-            first = first or r
-            if not any(overlap(r, o) for o in avoid):
-                return r, False
-    return first, True
+        for f in (0.5, 0.3, 0.7):
+            mx, my = p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f
+            if abs(p[1] - q[1]) < 1e-9:  # horizontal: above, then below
+                cands = [(mx - w / 2, my - h - 0.03, w, h), (mx - w / 2, my + 0.03, w, h)]
+            else:                        # vertical: right, then left
+                cands = [(mx + 0.05, my - h / 2, w, h), (mx - w - 0.05, my - h / 2, w, h)]
+            for r in cands:
+                if not any(overlap(r, o) for o in (*avoid, *lines)):
+                    return r, False
+                hit = sum(_area(r, o) for o in avoid) + 0.1 * sum(overlap(r, o) for o in lines)
+                if best is None or hit < best[0]:
+                    best = (hit, r)
+    return best[1], True

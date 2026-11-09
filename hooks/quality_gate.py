@@ -1,4 +1,6 @@
-"""Stop hook: block "done" while the latest arch-slide build has lint errors or hasn't been reviewed.
+"""Stop hook: block "done" while the latest arch-slide build has lint errors, no review, or a FAIL review.
+
+A PASS stays valid when minor findings are fixed afterwards, so small fixes don't force another review round.
 
 Looks only at ./arch-work/*/lint.json written in the last 6 hours, so other sessions are unaffected.
 Blocks once per stop attempt (stop_hook_active): Claude must fix the slide or tell the user why it can't pass.
@@ -28,11 +30,12 @@ def main():
         top = "; ".join(f"{e['rule']} ({e['id']}): {e['message']}" for e in errors[:4])
         problems.append(f"{len(errors)} lint error(s) in {latest.parent.name}: {top}")
     review = latest.with_name("review.md")
-    if not review.exists() or review.stat().st_mtime < latest.stat().st_mtime:
-        problems.append("the latest build has no review: run the arch-reviewer agent on the preview PNG and save "
+    if not review.exists():
+        problems.append("the build has no review: run the arch-reviewer agent on the preview PNG and save "
                         f"its verdict to {review}")
     elif not review.read_text(encoding="utf-8").lstrip().upper().startswith("VERDICT: PASS"):
-        problems.append(f"{review.name} does not say VERDICT: PASS")
+        problems.append(f"{review.name} does not say VERDICT: PASS: fix the findings with arch-builder and "
+                        "review again (2 rounds at most, then tell the user what is left)")
     if problems:
         print(json.dumps({"decision": "block", "reason": "arch-slide quality gate: " + " | ".join(problems) +
                           ". Fix the spec, rebuild, preview and review, or tell the user exactly why it can't pass."}))
